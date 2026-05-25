@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rover Preview Helper</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div class="headerRow">
+          <div>
+            <div class="eyebrow">Rover</div>
+            <h1>Preview Helper</h1>
+          </div>
+          <div id="tab-badge" class="tabBadge" style="display:none;">Rover tab</div>
+        </div>
+        <p class="subtle">Best flow: Workspace -> Live Test -> Use Workspace config -> Open target with helper. JSON paste is the fallback.</p>
+      </header>
+
+      <section id="tab-card" class="tabCard" style="display:none;">
+        <div class="tabCardHeader">
+          <div class="eyebrow">Rover</div>
+          <strong>This tab</strong>
+        </div>
+        <div id="tab-summary" class="tabSummary"></div>
+      </section>
+
+      <label class="field">
+        <span>Saved Rover config JSON</span>
+        <textarea id="config" spellcheck="false" placeholder='{"siteId":"...","publicKey":"pk_site_..."}
+
+or
+
+{"siteId":"...","sessionToken":"rvrsess_...","launchUrl":"https://example.com?rover_launch=...&rover_attach=..."}'></textarea>
+      </label>
+
+      <p class="hint">This editor is your saved reusable config. It stays the same across tabs. Tab-specific Rover runtime state is shown separately above.</p>
+
+      <div id="config-help" class="help-section" style="display:none;">
+        <p class="help-text">No config saved yet. Get one from:</p>
+        <div class="help-links">
+          <a href="https://www.rtrvr.ai/rover/workspace?view=test" target="_blank" class="help-link">Workspace → Test</a>
+          <span class="help-sep">or</span>
+          <a href="https://www.rtrvr.ai/rover/instant-preview?flow=workspace_config" target="_blank" class="help-link">Live Test</a>
+        </div>
+        <p class="help-hint">Sign in there, copy the reusable test config JSON, and paste it here — or use "Open target with helper" for zero-paste handoff.</p>
+      </div>
+
+      <div class="actions">
+        <button id="inject" class="primary">Inject Rover into this tab</button>
+        <button id="reconnect" class="secondary">Reconnect preview</button>
+      </div>
+
+      <p id="status" class="status">Idle.</p>
+    </main>
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>
