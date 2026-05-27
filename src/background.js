@@ -125,7 +125,11 @@ async function fetchPreviewConfig(params, tabUrl) {
     sessionId: data.helperConfig?.sessionId || data.sessionId,
     sessionTokenExpiresAt: data.runtimeSessionTokenExpiresAt || data.helperConfig?.sessionTokenExpiresAt,
     targetUrl: data.helperConfig?.targetUrl || data.targetUrl || tabUrl,
-    embedScriptUrl: data.helperConfig?.embedScriptUrl || 'https://rover.rtrvr.ai/embed.js',
+    embedScriptUrl: (() => {
+      const url = data.helperConfig?.embedScriptUrl || 'https://rover.rtrvr.ai/embed.js';
+      const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
+      return url + (url.includes('?') ? '&' : '?') + `_cb=${bucket}`;
+    })(),
     apiBase,
     requestId: data.helperConfig?.requestId || data.activeLaunch?.requestId,
     attachToken: data.helperConfig?.attachToken || data.activeLaunch?.attachToken,

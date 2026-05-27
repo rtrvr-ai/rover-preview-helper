@@ -26,7 +26,9 @@
   }
 
   const apiBase = String(state.apiBase || 'https://agent.rtrvr.ai').trim() || 'https://agent.rtrvr.ai';
-  const embedUrl = String(state.embedScriptUrl || 'https://rover.rtrvr.ai/embed.js').trim() || 'https://rover.rtrvr.ai/embed.js';
+  const rawEmbedUrl = String(state.embedScriptUrl || 'https://rover.rtrvr.ai/embed.js').trim() || 'https://rover.rtrvr.ai/embed.js';
+  const embedCacheBucket = Math.floor(Date.now() / (5 * 60 * 1000));
+  const embedUrl = rawEmbedUrl + (rawEmbedUrl.includes('?') ? '&' : '?') + `_cb=${embedCacheBucket}`;
   const siteId = String(state.siteId || '').trim();
   const publicKey = String(state.publicKey || '').trim();
   const sessionToken = String(state.sessionToken || '').trim();
