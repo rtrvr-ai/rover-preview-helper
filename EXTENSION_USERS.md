@@ -6,7 +6,7 @@ Use this when you want to test Rover from your own Chrome extension on live site
 
 Start in Rover, then paste the generated values into your extension.
 
-1. Open [https://rover.rtrvr.ai/workspace](https://rover.rtrvr.ai/workspace).
+1. Open [https://rtrvr.ai/rover/workspace](https://rtrvr.ai/rover/workspace).
 2. Create or select a Rover site.
 3. Add the target domain in the site policy, for example `linkedin.com`.
 4. Copy the extension/test config JSON from Workspace or Live Test.
@@ -47,7 +47,7 @@ The reliable extension pattern is:
 - download Rover runtime files at build time;
 - package them inside your extension;
 - inject packaged files with `chrome.scripting.executeScript`;
-- use Rover config from `rover.rtrvr.ai`.
+- use Rover config from `rtrvr.ai/rover`.
 
 ## Minimal File Layout
 
@@ -169,7 +169,7 @@ This avoids page CSP problems and reduces conflicts with the website's JavaScrip
   Package `embed.js` as `vendor/rover-embed.js` and inject the packaged file.
 
 - **Rover says the host is outside `allowedDomains`**  
-  Go back to [https://rover.rtrvr.ai/workspace](https://rover.rtrvr.ai/workspace) and add the domain. `linkedin.com` with `registrable_domain` covers `www.linkedin.com` and its subdomains.
+  Go back to [https://rtrvr.ai/rover/workspace](https://rtrvr.ai/rover/workspace) and add the domain. `linkedin.com` with `registrable_domain` covers `www.linkedin.com` and its subdomains.
 
 - **Actions are disabled**  
   Make sure the Workspace key has Rover Embed enabled and your config has `allowActions: true`.
