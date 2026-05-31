@@ -8,7 +8,7 @@ This is the right pattern for hackathon extensions that need to gather data from
 
 Yes, an extension can talk to Rover headlessly, but it should do it as an async event flow:
 
-1. Get a Rover config from [Rover Workspace](https://rover.rtrvr.ai/workspace) or [Live Test](https://www.rtrvr.ai/rover/instant-preview?flow=workspace_config).
+1. Get a Rover config from [Rover Workspace](https://rtrvr.ai/rover/workspace) or [Live Test](https://www.rtrvr.ai/rover/instant-preview?flow=workspace_config).
 2. Inject Rover into the page with the packaged `embed.js` runtime.
 3. Inject a small MAIN-world bridge that can access `window.rover`.
 4. Send a prompt from your extension to the bridge.
