@@ -163,6 +163,28 @@ Good split:
 
 This avoids page CSP problems and reduces conflicts with the website's JavaScript.
 
+## Trigger Rover Headlessly And Store Results
+
+If your extension needs to pass user input or a generated prompt into Rover without opening the Rover widget input, use a MAIN-world message bridge and Rover events.
+
+The core shape is:
+
+```js
+// MAIN-world bridge, after Rover has booted.
+window.rover.send("Extract the visible profile name and headline. Return JSON only.");
+window.rover.on("run_completed", result => {
+  window.postMessage({
+    source: "my-extension-rover-bridge",
+    type: "ROVER_HEADLESS_RESULT",
+    result
+  }, "*");
+});
+```
+
+Do not expect `rover.send(...)` to return the output directly. It starts an async Rover run. Your extension should listen for `run_completed`, `response_shown`, and `error`, then store the terminal result from the background service worker.
+
+See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge and [examples/headless-control-extension](./examples/headless-control-extension) for a copyable extension skeleton.
+
 ## Common Fixes
 
 - **CSP blocks `https://rover.rtrvr.ai/embed.js`**  

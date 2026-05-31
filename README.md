@@ -174,6 +174,7 @@ The popup is not asking for the production install snippet. It wants JSON only.
 - it does not create previews by itself
 - it does not mint preview tokens or production site keys
 - it does not replace Hosted Preview or Workspace
+- it does not make Rover calls synchronous; headless runs return results through events
 
 ## Reinjection model
 
@@ -183,6 +184,18 @@ The popup is not asking for the production install snippet. It wants JSON only.
 - the helper re-injects after reloads and history navigation
 
 The helper uses packaged extension scripts and `chrome.scripting.executeScript(...)`. It does not rely on remote bootstrap injection as its only reliability layer.
+
+## Headless or programmatic control
+
+Extensions can trigger Rover without using the Rover widget input, but the integration should be event-based:
+
+- inject Rover with a Workspace config;
+- inject a small MAIN-world bridge that can access `window.rover`;
+- call `rover.send(prompt)` from that bridge;
+- listen for `run_started`, `response_shown`, `run_completed`, and `error`;
+- relay results back to the extension background script for storage or backend calls.
+
+See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) and the copyable sample in [examples/headless-control-extension](./examples/headless-control-extension).
 
 ## Common mistakes
 
@@ -218,9 +231,9 @@ Be careful not to:
 
 ## Related docs
 
-- Rover repo: [https://github.com/rtrvr-ai/rover](https://github.com/rtrvr-ai/rover)
-- Try on Other Sites: [https://github.com/rtrvr-ai/rover/blob/main/docs/TRY_ON_OTHER_SITES.md](https://github.com/rtrvr-ai/rover/blob/main/docs/TRY_ON_OTHER_SITES.md)
-- Instant Preview architecture: [https://github.com/rtrvr-ai/rover/blob/main/docs/INSTANT_PREVIEW.md](https://github.com/rtrvr-ai/rover/blob/main/docs/INSTANT_PREVIEW.md)
-- SDK preview helpers: [https://github.com/rtrvr-ai/rover/tree/main/packages/sdk#preview-helpers](https://github.com/rtrvr-ai/rover/tree/main/packages/sdk#preview-helpers)
+- Extension users: [./EXTENSION_USERS.md](./EXTENSION_USERS.md)
+- Headless control: [./HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md)
+- Headless control sample: [./examples/headless-control-extension](./examples/headless-control-extension)
+- Rover Workspace: [https://rover.rtrvr.ai/workspace](https://rover.rtrvr.ai/workspace)
 - Hosted website walkthrough: [https://www.rtrvr.ai/rover/docs/try-on-other-sites](https://www.rtrvr.ai/rover/docs/try-on-other-sites)
 - Hosted preview API docs: [https://www.rtrvr.ai/rover/docs/instant-preview-api](https://www.rtrvr.ai/rover/docs/instant-preview-api)

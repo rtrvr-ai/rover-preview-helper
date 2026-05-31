@@ -28,6 +28,9 @@ async function build() {
   await copyFile(path.resolve(root.pathname, 'manifest.json'), path.join(distDir, 'manifest.json'));
   await copyTree(srcDir, path.join(distDir, 'src'));
   await copyFile(path.resolve(root.pathname, 'README.md'), path.join(distDir, 'README.md'));
+  await copyFile(path.resolve(root.pathname, 'EXTENSION_USERS.md'), path.join(distDir, 'EXTENSION_USERS.md'));
+  await copyFile(path.resolve(root.pathname, 'HEADLESS_CONTROL.md'), path.join(distDir, 'HEADLESS_CONTROL.md'));
+  await copyTree(path.resolve(root.pathname, 'examples'), path.join(distDir, 'examples'));
   console.log(`Built rover-preview-helper -> ${distDir}`);
 }
 

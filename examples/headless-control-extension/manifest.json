@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Rover Headless Control Example",
+  "version": "0.1.0",
+  "description": "Trigger Rover from an extension and store the result.",
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "host_permissions": ["https://www.linkedin.com/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Run Rover task"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["vendor/worker.js"],
+      "matches": ["https://www.linkedin.com/*"]
+    }
+  ]
+}
+
