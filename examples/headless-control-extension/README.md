@@ -5,7 +5,7 @@ This example shows the message-passing pattern for running Rover from an extensi
 ## Setup
 
 1. Copy this folder into your own extension project.
-2. Get a Rover config from [Rover Workspace](https://rover.rtrvr.ai/workspace) or [Live Test](https://www.rtrvr.ai/rover/instant-preview?flow=workspace_config).
+2. Get a Rover config from [Rover Workspace](https://rtrvr.ai/rover/workspace) or [Live Test](https://www.rtrvr.ai/rover/instant-preview?flow=workspace_config).
 3. Edit `background.js` and replace `ROVER_CONFIG` with your config.
 4. Download the Rover runtime into `vendor/`:
 

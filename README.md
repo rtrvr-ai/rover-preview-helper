@@ -234,6 +234,6 @@ Be careful not to:
 - Extension users: [./EXTENSION_USERS.md](./EXTENSION_USERS.md)
 - Headless control: [./HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md)
 - Headless control sample: [./examples/headless-control-extension](./examples/headless-control-extension)
-- Rover Workspace: [https://rover.rtrvr.ai/workspace](https://rover.rtrvr.ai/workspace)
+- Rover Workspace: [https://rtrvr.ai/rover/workspace](https://rtrvr.ai/rover/workspace)
 - Hosted website walkthrough: [https://www.rtrvr.ai/rover/docs/try-on-other-sites](https://www.rtrvr.ai/rover/docs/try-on-other-sites)
 - Hosted preview API docs: [https://www.rtrvr.ai/rover/docs/instant-preview-api](https://www.rtrvr.ai/rover/docs/instant-preview-api)
