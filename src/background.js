@@ -9,6 +9,7 @@ import {
   STORAGE_KEY_PREFIX,
   stripPreviewLaunchParams,
 } from './shared.js';
+import { enableCspBypass, disableCspBypass } from './csp-bypass.js';
 
 const inMemoryState = new Map();
 const pendingInjects = new Map();
@@ -125,11 +126,6 @@ async function fetchPreviewConfig(params, tabUrl) {
     sessionId: data.helperConfig?.sessionId || data.sessionId,
     sessionTokenExpiresAt: data.runtimeSessionTokenExpiresAt || data.helperConfig?.sessionTokenExpiresAt,
     targetUrl: data.helperConfig?.targetUrl || data.targetUrl || tabUrl,
-    embedScriptUrl: (() => {
-      const url = data.helperConfig?.embedScriptUrl || 'https://rover.rtrvr.ai/embed.js';
-      const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
-      return url + (url.includes('?') ? '&' : '?') + `_cb=${bucket}`;
-    })(),
     apiBase,
     requestId: data.helperConfig?.requestId || data.activeLaunch?.requestId,
     attachToken: data.helperConfig?.attachToken || data.activeLaunch?.attachToken,
@@ -243,6 +239,16 @@ async function injectMainWorldState(tabId, state) {
   if (existing === signature) return true;
   pendingInjects.set(tabId, signature);
 
+  // Load the Rover worker from the packaged file (resolved relative to the
+  // extension, not the page) unless the caller pinned an explicit workerUrl.
+  // embed.js is injected via executeScript below, so its document.currentScript
+  // is null and it can't derive the worker path on its own.
+  const seedState = {
+    ...state,
+    workerUrl: state.workerUrl || chrome.runtime.getURL('vendor/worker.js'),
+    bootstrapId: signature,
+  };
+
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: false },
@@ -251,12 +257,10 @@ async function injectMainWorldState(tabId, state) {
       func: previewState => {
         window.__ROVER_PREVIEW_HELPER_STATE__ = previewState;
       },
-      args: [serializeConfigForSeed({
-        ...state,
-        bootstrapId: signature,
-      })],
+      args: [serializeConfigForSeed(seedState)],
     });
 
+    // Sets up the rover() queue and calls rover('boot', config) with workerUrl.
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: false },
       world: 'MAIN',
@@ -264,10 +268,35 @@ async function injectMainWorldState(tabId, state) {
       files: ['src/main-world-bootstrap.js'],
     });
 
+    // Inject the packaged Rover runtime directly. Scripts injected via
+    // executeScript bypass the page's CSP, so this works on hardened sites where
+    // a remote <script src="https://rover.rtrvr.ai/embed.js"> tag is blocked.
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: false },
+      world: 'MAIN',
+      injectImmediately: true,
+      files: ['vendor/rover-embed.js'],
+    });
+
     return true;
   } finally {
     pendingInjects.delete(tabId);
   }
+}
+
+// Inject Rover into a tab, first ensuring the page CSP won't block its egress.
+// The CSP relaxation only takes effect on the next document load, so the first
+// time we enable it for a tab we reload and let the readiness/navigation hooks
+// re-run injection on the clean page. Subsequent calls inject directly.
+async function applyStateToTab(tabId, state) {
+  if (!state) return false;
+  const newlyEnabled = await enableCspBypass(tabId);
+  if (newlyEnabled) {
+    await writeStatus(tabId, `Reloading ${state.targetHost || 'tab'} to clear its CSP, then injecting Rover…`);
+    await chrome.tabs.reload(tabId);
+    return false;
+  }
+  return await injectMainWorldState(tabId, state);
 }
 
 async function injectFromTab(tabId, config) {
@@ -303,8 +332,10 @@ async function injectFromTab(tabId, config) {
 
   await writeState(tabId, state);
   await persistConfig(state);
-  await injectMainWorldState(tabId, state);
-  await writeStatus(tabId, `Rover injected for ${targetHost}.`);
+  const injected = await applyStateToTab(tabId, state);
+  if (injected) {
+    await writeStatus(tabId, `Rover injected for ${targetHost}.`);
+  }
 
   return state;
 }
@@ -318,7 +349,7 @@ async function reconnectTab(tabId) {
   } catch {
     refreshed = state;
   }
-  return await injectMainWorldState(tabId, refreshed);
+  return await applyStateToTab(tabId, refreshed);
 }
 
 function getTabIdFromSender(sender) {
@@ -353,8 +384,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (pageUrl && !canReinjectStateOnUrl(state, pageUrl)) return;
       try {
         const refreshed = await refreshStateFromBackend(tabId, state, pageUrl).catch(() => state);
-        await injectMainWorldState(tabId, refreshed || state);
-        await writeStatus(tabId, `Rover reconnected for ${buildTargetHost(pageUrl, refreshed || state) || 'this tab'}.`);
+        const injected = await applyStateToTab(tabId, refreshed || state);
+        if (injected) {
+          await writeStatus(tabId, `Rover reconnected for ${buildTargetHost(pageUrl, refreshed || state) || 'this tab'}.`);
+        }
       } catch {
         // Ignore readiness races; tab navigation hooks will retry.
       }
@@ -410,6 +443,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.tabs.onRemoved.addListener(tabId => {
   void clearState(tabId);
+  void disableCspBypass(tabId);
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
@@ -428,7 +462,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (!canReinjectStateOnUrl(state, url)) return;
     if (changeInfo.status === 'loading' || changeInfo.status === 'complete') {
       const refreshed = await refreshStateFromBackend(tabId, state, url).catch(() => state);
-      await injectMainWorldState(tabId, refreshed || state);
+      await applyStateToTab(tabId, refreshed || state);
     }
   })();
 });
@@ -446,7 +480,7 @@ chrome.webNavigation.onHistoryStateUpdated.addListener(details => {
     if (!state) return;
     if (!canReinjectStateOnUrl(state, details.url || '')) return;
     const refreshed = await refreshStateFromBackend(details.tabId, state, details.url || '').catch(() => state);
-    await injectMainWorldState(details.tabId, refreshed || state);
+    await applyStateToTab(details.tabId, refreshed || state);
   })();
 });
 
@@ -463,6 +497,6 @@ chrome.webNavigation.onCompleted.addListener(details => {
     if (!state) return;
     if (!canReinjectStateOnUrl(state, details.url || '')) return;
     const refreshed = await refreshStateFromBackend(details.tabId, state, details.url || '').catch(() => state);
-    await injectMainWorldState(details.tabId, refreshed || state);
+    await applyStateToTab(details.tabId, refreshed || state);
   })();
 });

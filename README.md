@@ -117,6 +117,56 @@ For local iteration:
 pnpm dev
 ```
 
+## How the runtime is bundled (CSP-safe)
+
+Some sites block remote scripts with Content Security Policy, so a
+`<script src="https://rover.rtrvr.ai/embed.js">` tag is rejected before Rover
+boots. Manifest V3 also expects extension-executed JavaScript to ship inside the
+package, not be fetched as remote code.
+
+To avoid this, `pnpm build` packages the Rover runtime into the extension:
+
+- it downloads `embed.js` and `worker/worker.js` from prod into `dist/vendor/`
+  (`rover-embed.js` and `worker.js`), and writes `dist/vendor/VERSION.json` with
+  the source, byte sizes, and ETags for traceability;
+- the background worker injects `vendor/rover-embed.js` with
+  `chrome.scripting.executeScript({ world: 'MAIN' })`, which bypasses the page
+  CSP, and boots Rover with `workerUrl` pointing at the packaged
+  `vendor/worker.js` (declared as a `web_accessible_resource`).
+
+Build behavior:
+
+- a plain `pnpm build` re-downloads the latest runtime from prod every run;
+- if the network is unavailable it reuses the last cached copy (in
+  `.rover-vendor-cache/`) with a warning, and only fails if there is neither a
+  cache nor a network;
+- `pnpm dev` (watch mode) reuses the cache so rebuilds stay instant and offline;
+- set `ROVER_EMBED_BASE` to vendor from a staging deploy instead of prod.
+
+### Strict sites: page CSP relaxation
+
+Loading the runtime is only half the story. Because Rover runs in the page's main
+world, the page's CSP also governs Rover's **network egress** (`fetch`, SSE, and
+WebSocket to `agent.rtrvr.ai`), its mascot media (`media-src`), fonts
+(`font-src`), and the module worker (`worker-src`). On hardened sites (e.g. one
+with `connect-src` allow-listing only its own API) those are blocked.
+
+To make previews work there, the helper strips the page's
+`Content-Security-Policy` response header **only for the tab you inject into**,
+using a session-scoped `declarativeNetRequest` rule
+(`src/csp-bypass.js`). Because a CSP is locked in at page load, the first inject
+into a tab reloads it once so the relaxed policy takes effect; the rule is removed
+when the tab closes and never survives a browser restart.
+
+This means the previewed tab runs without the site's CSP while you test. That is
+acceptable for a developer testing tool, and is scoped as tightly as the platform
+allows (one tab, session-only).
+
+Remaining limitation: a CSP delivered via an HTML `<meta http-equiv>` tag instead
+of a response header cannot be removed by `declarativeNetRequest`, so the rare
+site that ships its policy that way can still block Rover's egress. The
+[headless approach](./EXTENSION_USERS.md) is the alternative for those cases.
+
 ## Getting your config
 
 - [Workspace → Test](https://www.rtrvr.ai/rover/workspace?view=test): copy the reusable wildcard test config JSON.
@@ -162,6 +212,7 @@ The popup is not asking for the production install snippet. It wants JSON only.
 ## What the helper does
 
 - injects Rover into the active tab from popup JSON config
+- bundles the Rover runtime and relaxes the active tab's CSP so it works on strict sites (reloads the tab once on first inject)
 - auto-hydrates from hosted preview handoff fragments
 - refreshes hosted preview state when reconnecting
 - re-injects on reload and history navigation
@@ -181,9 +232,10 @@ The popup is not asking for the production install snippet. It wants JSON only.
 - a `document_start` content script signals page readiness
 - the background worker decides whether to hydrate hosted preview state or reconnect saved state
 - packaged main-world bootstrap code seeds Rover boot config into the page
+- the packaged Rover runtime (`vendor/rover-embed.js`) is injected via `chrome.scripting.executeScript`, bypassing page CSP
 - the helper re-injects after reloads and history navigation
 
-The helper uses packaged extension scripts and `chrome.scripting.executeScript(...)`. It does not rely on remote bootstrap injection as its only reliability layer.
+The helper only uses packaged extension scripts injected with `chrome.scripting.executeScript(...)`. It never appends a remote `<script>` tag, so page CSP cannot block the Rover runtime from loading.
 
 ## Headless or programmatic control
 

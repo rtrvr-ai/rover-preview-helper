@@ -26,9 +26,6 @@
   }
 
   const apiBase = String(state.apiBase || 'https://agent.rtrvr.ai').trim() || 'https://agent.rtrvr.ai';
-  const rawEmbedUrl = String(state.embedScriptUrl || 'https://rover.rtrvr.ai/embed.js').trim() || 'https://rover.rtrvr.ai/embed.js';
-  const embedCacheBucket = Math.floor(Date.now() / (5 * 60 * 1000));
-  const embedUrl = rawEmbedUrl + (rawEmbedUrl.includes('?') ? '&' : '?') + `_cb=${embedCacheBucket}`;
   const siteId = String(state.siteId || '').trim();
   const publicKey = String(state.publicKey || '').trim();
   const sessionToken = String(state.sessionToken || '').trim();
@@ -109,14 +106,10 @@
 
   rover('boot', bootConfig);
 
-  if (!document.querySelector(`script[data-rover-preview-helper="${state.bootstrapId || '1'}"]`)) {
-    const script = document.createElement('script');
-    script.async = true;
-    script.src = embedUrl;
-    script.dataset.roverPreviewHelper = String(state.bootstrapId || '1');
-    script.crossOrigin = 'anonymous';
-    document.documentElement.appendChild(script);
-  }
+  // The packaged Rover runtime (vendor/rover-embed.js) is injected by the
+  // background service worker via chrome.scripting.executeScript right after this
+  // bootstrap, so it bypasses the page CSP and drains this rover('boot', ...) call
+  // from the queue. We intentionally do not append a remote <script> tag here.
 
   delete window.__ROVER_PREVIEW_HELPER_STATE__;
 })();

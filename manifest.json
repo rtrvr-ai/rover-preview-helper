@@ -16,7 +16,8 @@
     "scripting",
     "storage",
     "tabs",
-    "webNavigation"
+    "webNavigation",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -31,6 +32,16 @@
       ],
       "run_at": "document_start",
       "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "vendor/worker.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

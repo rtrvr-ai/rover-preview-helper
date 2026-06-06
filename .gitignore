@@ -1,3 +1,4 @@
 dist/
 node_modules/
+.rover-vendor-cache/
 .DS_Store

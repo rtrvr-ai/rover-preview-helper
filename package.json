@@ -9,6 +9,6 @@
     "build": "node scripts/build.mjs",
     "clean": "node scripts/clean.mjs",
     "dev": "node scripts/build.mjs --watch",
-    "test": "node --test src/*.test.mjs"
+    "test": "node --test src/*.test.mjs scripts/*.test.mjs"
   }
 }

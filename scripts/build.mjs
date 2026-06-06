@@ -1,6 +1,7 @@
 import { mkdir, rm, copyFile, readdir } from 'node:fs/promises';
 import { watch } from 'node:fs';
 import path from 'node:path';
+import { vendorRoverRuntime } from './vendor.mjs';
 
 const root = new URL('..', import.meta.url);
 const srcDir = path.resolve(root.pathname, 'src');
@@ -25,6 +26,11 @@ async function copyTree(fromDir, toDir) {
 async function build() {
   await rm(distDir, { recursive: true, force: true });
   await mkdir(distDir, { recursive: true });
+  // Package the Rover runtime (embed.js + worker.js) so it can be injected via
+  // chrome.scripting.executeScript instead of a page-CSP-blocked remote <script>.
+  // A plain `pnpm build` fetches the latest from prod; watch mode reuses cache.
+  console.log('Vendoring Rover runtime:');
+  await vendorRoverRuntime({ refresh: !watchMode, distDir });
   await copyFile(path.resolve(root.pathname, 'manifest.json'), path.join(distDir, 'manifest.json'));
   await copyTree(srcDir, path.join(distDir, 'src'));
   await copyFile(path.resolve(root.pathname, 'README.md'), path.join(distDir, 'README.md'));
