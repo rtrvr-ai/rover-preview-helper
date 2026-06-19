@@ -23,8 +23,12 @@ export function vendorBase(env = process.env) {
 export function vendorTargets(base = vendorBase(), distDir = path.join(rootDir, 'dist')) {
   return [
     {
+      // The extension injects this file with chrome.scripting.executeScript.
+      // Use the full SDK core, not the lightweight /embed.js loader that expects
+      // to derive embed-core.js from a real <script src> element.
       name: 'embed',
-      url: `${base}/embed.js`,
+      url: `${base}/embed-core.js`,
+      fallbackUrls: [`${base}/embed.js`],
       cacheFile: path.join(CACHE_DIR, 'rover-embed.js'),
       distFile: path.join(distDir, 'vendor', 'rover-embed.js'),
     },
@@ -38,9 +42,11 @@ export function vendorTargets(base = vendorBase(), distDir = path.join(rootDir, 
 }
 
 /**
- * Guard against caching/bundling an HTML error page or empty body in place of
- * the real runtime. embed.js is a self-executing SDK bundle; worker.js is a
- * plain module. Both must be sizable JS, never start with an HTML tag.
+ * Guard against caching/bundling an HTML error page, loader stub, or empty body
+ * in place of the executable runtime. rover-embed.js must be the full SDK core
+ * because the helper injects it with chrome.scripting.executeScript, where
+ * document.currentScript is not reliable enough for the lightweight loader to
+ * find embed-core.js. worker.js must be a sizable worker bundle.
  */
 export function looksLikeRoverRuntime(name, text) {
   const body = String(text || '');
@@ -49,11 +55,20 @@ export function looksLikeRoverRuntime(name, text) {
   if (head.startsWith('<!doctype') || head.startsWith('<html') || head.startsWith('<')) {
     return false;
   }
+
+  const hasAll = markers => markers.every(marker => body.includes(marker));
+  const hasAny = markers => markers.some(marker => body.includes(marker));
+
   if (name === 'embed') {
-    return body.includes('__roverSDK') || body.includes('__ROVER_SCRIPT_URL__');
+    return hasAll(['__roverSDK', '__ROVER_SCRIPT_URL__'])
+      && hasAny(['window.rover', 'installGlobal', 'createRoverScriptTagSnippet'])
+      && hasAll(['agent.rtrvr.ai', 'data-rover-methods']);
   }
-  // worker.js has no stable public token; rely on size + not-HTML above.
-  return true;
+  if (name === 'worker') {
+    return hasAny(['self.onmessage', 'addEventListener("message"', "addEventListener('message'"])
+      && hasAny(['self.postMessage', 'postMessage({']);
+  }
+  return false;
 }
 
 async function fileExists(filePath) {
@@ -65,20 +80,36 @@ async function fileExists(filePath) {
   }
 }
 
-async function downloadTarget(target) {
-  const response = await fetch(target.url, { cache: 'no-store', redirect: 'follow' });
+async function downloadUrl(target, url) {
+  const response = await fetch(url, { cache: 'no-store', redirect: 'follow' });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} ${response.statusText}`);
   }
   const text = await response.text();
   if (!looksLikeRoverRuntime(target.name, text)) {
-    throw new Error('downloaded body did not look like the Rover runtime');
+    throw new Error(`downloaded body from ${url} did not look like the Rover runtime`);
   }
   return {
     text,
+    url,
     etag: response.headers.get('etag') || '',
     lastModified: response.headers.get('last-modified') || '',
   };
+}
+
+async function downloadTarget(target) {
+  const urls = [target.url, ...(target.fallbackUrls || [])];
+  const errors = [];
+
+  for (const url of urls) {
+    try {
+      return await downloadUrl(target, url);
+    } catch (error) {
+      errors.push(`${url}: ${error?.message || error}`);
+    }
+  }
+
+  throw new Error(errors.join('; '));
 }
 
 /**
@@ -109,6 +140,7 @@ export async function vendorRoverRuntime(options = {}) {
     let etag = '';
     let lastModified = '';
     let source = 'cache';
+    let sourceUrl = '';
 
     if (refresh || !hasCache) {
       try {
@@ -116,6 +148,7 @@ export async function vendorRoverRuntime(options = {}) {
         await writeFile(target.cacheFile, downloaded.text);
         etag = downloaded.etag;
         lastModified = downloaded.lastModified;
+        sourceUrl = downloaded.url;
         source = 'network';
       } catch (error) {
         if (!hasCache) {
@@ -131,7 +164,14 @@ export async function vendorRoverRuntime(options = {}) {
 
     await copyFile(target.cacheFile, target.distFile);
     const bytes = (await stat(target.distFile)).size;
-    manifestFiles.push({ name: target.name, file: path.basename(target.distFile), bytes, etag, lastModified });
+    manifestFiles.push({
+      name: target.name,
+      file: path.basename(target.distFile),
+      url: sourceUrl || target.url,
+      bytes,
+      etag,
+      lastModified,
+    });
     log(`  - ${path.basename(target.distFile)}: ${bytes.toLocaleString()} bytes (${source})`);
   }
 

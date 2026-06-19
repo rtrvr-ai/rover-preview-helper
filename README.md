@@ -126,9 +126,10 @@ package, not be fetched as remote code.
 
 To avoid this, `pnpm build` packages the Rover runtime into the extension:
 
-- it downloads `embed.js` and `worker/worker.js` from prod into `dist/vendor/`
-  (`rover-embed.js` and `worker.js`), and writes `dist/vendor/VERSION.json` with
-  the source, byte sizes, and ETags for traceability;
+- it downloads the full SDK core (`embed-core.js`) and `worker/worker.js` from
+  prod into `dist/vendor/` (`rover-embed.js` and `worker.js`), and writes
+  `dist/vendor/VERSION.json` with the source, byte sizes, and ETags for
+  traceability;
 - the background worker injects `vendor/rover-embed.js` with
   `chrome.scripting.executeScript({ world: 'MAIN' })`, which bypasses the page
   CSP, and boots Rover with `workerUrl` pointing at the packaged

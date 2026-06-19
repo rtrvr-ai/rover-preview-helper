@@ -24,7 +24,8 @@ test('vendorTargets maps embed + worker to the right URLs and dist paths', () =>
   assert.equal(targets.length, 2);
 
   const embed = targets.find(t => t.name === 'embed');
-  assert.equal(embed.url, 'https://rover.rtrvr.ai/embed.js');
+  assert.equal(embed.url, 'https://rover.rtrvr.ai/embed-core.js');
+  assert.deepEqual(embed.fallbackUrls, ['https://rover.rtrvr.ai/embed.js']);
   assert.equal(embed.distFile, path.join(distDir, 'vendor', 'rover-embed.js'));
 
   const worker = targets.find(t => t.name === 'worker');
@@ -32,11 +33,14 @@ test('vendorTargets maps embed + worker to the right URLs and dist paths', () =>
   assert.equal(worker.distFile, path.join(distDir, 'vendor', 'worker.js'));
 });
 
-test('looksLikeRoverRuntime accepts real runtime, rejects HTML and tiny bodies', () => {
-  const embedBody = `var __ROVER_SCRIPT_URL__='';var __roverSDK=(()=>{${'x'.repeat(2000)}})();`;
+test('looksLikeRoverRuntime accepts executable runtimes, rejects HTML, tiny bodies, and loader stubs', () => {
+  const embedBody = [
+    "var __ROVER_SCRIPT_URL__='';",
+    `var __roverSDK=(()=>{window.rover=function(){};const a='https://agent.rtrvr.ai';const b='data-rover-methods';${'x'.repeat(2000)}})();`,
+  ].join('');
   assert.equal(looksLikeRoverRuntime('embed', embedBody), true);
 
-  const workerBody = `var Ct=class{};${'y'.repeat(2000)}`;
+  const workerBody = `self.onmessage=()=>{self.postMessage({type:"ok"});};${'y'.repeat(2000)}`;
   assert.equal(looksLikeRoverRuntime('worker', workerBody), true);
 
   // An HTML error page (404/redirect interstitial) must be rejected even if long.
@@ -48,6 +52,19 @@ test('looksLikeRoverRuntime accepts real runtime, rejects HTML and tiny bodies',
   assert.equal(looksLikeRoverRuntime('embed', 'var x=1;'), false);
   assert.equal(looksLikeRoverRuntime('worker', ''), false);
 
-  // Right size, but missing the embed marker.
+  // Right size, but missing the executable-runtime markers.
   assert.equal(looksLikeRoverRuntime('embed', 'z'.repeat(2000)), false);
+  assert.equal(looksLikeRoverRuntime('worker', 'z'.repeat(2000)), false);
+
+  // The public /embed.js loader is real Rover JavaScript, but this helper needs
+  // the executable SDK core because it injects with chrome.scripting.executeScript.
+  const loaderBody = [
+    '"use strict";(()=>{',
+    'const base="https://agent.rtrvr.ai";',
+    'const core="embed-core.js";',
+    'document.createElement("script").setAttribute("data-rover-core","api");',
+    'document.createElement("link").setAttribute("data-rover-methods","GET POST");',
+    `${'l'.repeat(2000)}})();`,
+  ].join('');
+  assert.equal(looksLikeRoverRuntime('embed', loaderBody), false);
 });

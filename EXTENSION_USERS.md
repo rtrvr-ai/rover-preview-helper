@@ -64,7 +64,7 @@ Download the runtime files once while building your extension:
 
 ```bash
 mkdir -p vendor
-curl -L https://rover.rtrvr.ai/embed.js -o vendor/rover-embed.js
+curl -L https://rover.rtrvr.ai/embed-core.js -o vendor/rover-embed.js
 curl -L https://rover.rtrvr.ai/worker/worker.js -o vendor/worker.js
 ```
 
@@ -158,7 +158,7 @@ Good split:
 
 - `background.js`: extension button, permissions, network calls, storage.
 - `content.js`: your overlay UI, DOM reads, click/type helpers.
-- `vendor/rover-embed.js`: packaged Rover runtime.
+- `vendor/rover-embed.js`: packaged Rover SDK core.
 - `vendor/worker.js`: packaged Rover worker.
 
 This avoids page CSP problems and reduces conflicts with the website's JavaScript.
@@ -188,7 +188,7 @@ See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge and [exampl
 ## Common Fixes
 
 - **CSP blocks `https://rover.rtrvr.ai/embed.js`**  
-  Package `embed.js` as `vendor/rover-embed.js` and inject the packaged file.
+  Package `embed-core.js` as `vendor/rover-embed.js` and inject the packaged file.
 
 - **Rover says the host is outside `allowedDomains`**  
   Go back to [https://rtrvr.ai/rover/workspace](https://rtrvr.ai/rover/workspace) and add the domain. `linkedin.com` with `registrable_domain` covers `www.linkedin.com` and its subdomains.

@@ -26,7 +26,7 @@ async function copyTree(fromDir, toDir) {
 async function build() {
   await rm(distDir, { recursive: true, force: true });
   await mkdir(distDir, { recursive: true });
-  // Package the Rover runtime (embed.js + worker.js) so it can be injected via
+  // Package the Rover runtime core + worker so the SDK can be injected via
   // chrome.scripting.executeScript instead of a page-CSP-blocked remote <script>.
   // A plain `pnpm build` fetches the latest from prod; watch mode reuses cache.
   console.log('Vendoring Rover runtime:');

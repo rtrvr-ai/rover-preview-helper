@@ -11,7 +11,7 @@ This example shows the message-passing pattern for running Rover from an extensi
 
 ```bash
 mkdir -p vendor
-curl -L https://rover.rtrvr.ai/embed.js -o vendor/rover-embed.js
+curl -L https://rover.rtrvr.ai/embed-core.js -o vendor/rover-embed.js
 curl -L https://rover.rtrvr.ai/worker/worker.js -o vendor/worker.js
 ```
 
@@ -33,4 +33,3 @@ The extension injects Rover, sends a prompt without using the Rover widget UI, l
 - `run_completed` is the terminal event to store.
 - `response_shown` is useful for capturing assistant text while the run is still active.
 - For production, replace the hardcoded prompt with your popup, side panel, context menu, or background logic.
-
