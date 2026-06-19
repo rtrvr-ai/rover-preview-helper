@@ -144,6 +144,10 @@ Build behavior:
 - `pnpm dev` (watch mode) reuses the cache so rebuilds stay instant and offline;
 - set `ROVER_EMBED_BASE` to vendor from a staging deploy instead of prod.
 
+Website owners should still install Rover with the public `embed.js` snippet.
+This helper uses `embed-core.js` because it injects Rover directly from a Chrome
+extension instead of loading it through a normal page `<script src>` tag.
+
 ### Strict sites: page CSP relaxation
 
 Loading the runtime is only half the story. Because Rover runs in the page's main

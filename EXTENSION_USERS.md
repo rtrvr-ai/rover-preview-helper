@@ -70,6 +70,11 @@ curl -L https://rover.rtrvr.ai/worker/worker.js -o vendor/worker.js
 
 Keep those files checked into your local hackathon extension or copied into your build output.
 
+For a normal website install, keep using the public `embed.js` snippet. For a
+Chrome extension that injects Rover with `chrome.scripting.executeScript`, use
+`embed-core.js` as shown here so the full SDK executes without relying on a
+page `<script src>` element.
+
 ## Manifest Example
 
 This example is scoped to LinkedIn. Change `host_permissions` and `matches` for your target site.
