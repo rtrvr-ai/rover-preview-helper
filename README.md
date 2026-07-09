@@ -148,7 +148,7 @@ Website owners should still install Rover with the public `embed.js` snippet.
 This helper uses `embed-core.js` because it injects Rover directly from a Chrome
 extension instead of loading it through a normal page `<script src>` tag.
 
-### Strict sites: page CSP relaxation
+### Strict sites: reactive page CSP relaxation
 
 Loading the runtime is only half the story. Because Rover runs in the page's main
 world, the page's CSP also governs Rover's **network egress** (`fetch`, SSE, and
@@ -156,21 +156,34 @@ WebSocket to `agent.rtrvr.ai`), its mascot media (`media-src`), fonts
 (`font-src`), and the module worker (`worker-src`). On hardened sites (e.g. one
 with `connect-src` allow-listing only its own API) those are blocked.
 
-To make previews work there, the helper strips the page's
-`Content-Security-Policy` response header **only for the tab you inject into**,
-using a session-scoped `declarativeNetRequest` rule
-(`src/csp-bypass.js`). Because a CSP is locked in at page load, the first inject
-into a tab reloads it once so the relaxed policy takes effect; the rule is removed
-when the tab closes and never survives a browser restart.
+The helper relaxes CSP **reactively — only when Rover is actually blocked**, never
+speculatively. It injects Rover directly; a `document_start` content-script sensor
+(`src/content-start.js`) listens for the page's `securitypolicyviolation` events. If
+a violation is attributable to Rover (an rtrvr host, the configured API/runtime host,
+or its worker) and the tab is still inside the saved `allowedDomains` policy, it tells
+the background, which climbs a bounded per-tab/host ladder and reloads once so the
+relaxation applies to a clean load:
 
-This means the previewed tab runs without the site's CSP while you test. That is
-acceptable for a developer testing tool, and is scoped as tightly as the platform
-allows (one tab, session-only).
+1. **`declarativeNetRequest`** strips the `Content-Security-Policy` response header
+   for that tab only (`src/csp-bypass.js`).
+2. If the site ships its policy in a `<meta http-equiv="Content-Security-Policy">`
+   tag (which header rules can't remove — Chromium applies a `<meta>` CSP the instant
+   the parser inserts it and never revokes it), the helper escalates to the DevTools
+   protocol: it attaches `chrome.debugger` and calls `Page.setBypassCSP(true)`
+   (`src/csp-bypass-debugger.js`), disabling **all** of the tab's CSP — header and
+   `<meta>` — covering egress, worker, fonts, styles, and media at once.
 
-Remaining limitation: a CSP delivered via an HTML `<meta http-equiv>` tag instead
-of a response header cannot be removed by `declarativeNetRequest`, so the rare
-site that ships its policy that way can still block Rover's egress. The
-[headless approach](./EXTENSION_USERS.md) is the alternative for those cases.
+So a site that doesn't block Rover (most demos) gets **no reload and no debugger
+banner**. Only a genuinely `<meta>`-CSP-blocked site (e.g. `app.merge.dev`) reaches
+step 2. That path needs the `debugger` permission and shows a "Rover Preview Helper
+started debugging this browser" banner while attached; hide it for polished demos by
+launching Chrome with `--silent-debugger-extension-api`.
+
+Everything is scoped to the one injected tab, host, and session: the DNR rule and the
+debugger attach are removed when the tab leaves the configured domain scope or closes,
+tracked in `chrome.storage.session` so same-host strict pages survive a service-worker
+restart, and never outlive a browser restart. The [headless approach](./EXTENSION_USERS.md)
+remains an alternative when you'd rather not attach the debugger.
 
 ## Getting your config
 
@@ -217,12 +230,12 @@ The popup is not asking for the production install snippet. It wants JSON only.
 ## What the helper does
 
 - injects Rover into the active tab from popup JSON config
-- bundles the Rover runtime and relaxes the active tab's CSP so it works on strict sites (reloads the tab once on first inject)
+- bundles the Rover runtime and, only when a strict site actually blocks Rover, relaxes that tab's CSP reactively (declarativeNetRequest header strip, escalating to a `chrome.debugger` `Page.setBypassCSP` bypass for `<meta>`-tag CSP) — clean sites get no reload and no debugger banner
 - auto-hydrates from hosted preview handoff fragments
 - refreshes hosted preview state when reconnecting
 - re-injects on reload and history navigation
-- keeps hosted handoff scoping tied to the intended target host
-- lets generic reusable/exact configs keep re-injecting while later pages stay inside `allowedDomains`
+- follows the config's `allowedDomains` and `domainScopeMode` for hosted handoffs and generic configs
+- keeps re-injecting while later pages stay inside that domain policy
 - rejects tabs whose host is outside the config's `allowedDomains`
 
 ## What it does not do

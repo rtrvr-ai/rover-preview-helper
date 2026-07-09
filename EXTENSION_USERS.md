@@ -195,6 +195,17 @@ See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge and [exampl
 - **CSP blocks `https://rover.rtrvr.ai/embed.js`**  
   Package `embed-core.js` as `vendor/rover-embed.js` and inject the packaged file.
 
+- **A strict site still blocks Rover's egress (`Refused to connect`, `connect-src`)**
+  The page enforces CSP. The helper relaxes it *reactively* — a content-script sensor
+  watches for a `securitypolicyviolation` caused by Rover, then strips the CSP
+  *response header* for the tab with a `declarativeNetRequest` rule
+  (`src/csp-bypass.js`) and, if the policy comes from a `<meta http-equiv>` tag
+  (headers can't reach it), attaches `chrome.debugger` + `Page.setBypassCSP(true)`
+  (`src/csp-bypass-debugger.js`). The debugger path needs the `debugger` permission
+  and shows a debug banner (hide it with `--silent-debugger-extension-api`). Sites
+  that don't block Rover are never reloaded and never show the banner. The bypass is
+  dropped when the tab leaves the configured host/domain scope.
+
 - **Rover says the host is outside `allowedDomains`**  
   Go back to [https://rtrvr.ai/rover/workspace](https://rtrvr.ai/rover/workspace) and add the domain. `linkedin.com` with `registrable_domain` covers `www.linkedin.com` and its subdomains.
 

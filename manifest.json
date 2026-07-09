@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Rover Preview Helper",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Inject Rover into a live tab and reconnect preview sessions after navigation.",
   "action": {
     "default_title": "Rover Preview Helper",
@@ -17,7 +17,8 @@
     "storage",
     "tabs",
     "webNavigation",
-    "declarativeNetRequestWithHostAccess"
+    "declarativeNetRequestWithHostAccess",
+    "debugger"
   ],
   "host_permissions": [
     "<all_urls>"

@@ -1,14 +1,62 @@
 (() => {
   const state = window.__ROVER_PREVIEW_HELPER_STATE__;
   if (!state || window.__ROVER_PREVIEW_HELPER_BOOTSTRAPPED__) return;
-  window.__ROVER_PREVIEW_HELPER_BOOTSTRAPPED__ = true;
+  // "This config was tried on this document" — set before the host-allow check
+  // so a bail doesn't leave the background re-injecting the 1.26 MB bundle on
+  // every navigation event. BOOTSTRAPPED below keeps meaning "a live Rover
+  // instance owns this document"; the probe treats attempted+same-signature as
+  // skip, while a changed config (new signature) still gets a fresh attempt.
+  window.__ROVER_PREVIEW_HELPER_BOOTSTRAP_ATTEMPTED__ = true;
+
+  const normalizeDomainPattern = value => {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw) return '';
+    if (raw === '*') return '*';
+    const exact = raw.startsWith('=');
+    const wildcard = !exact && raw.startsWith('*.');
+    const core = exact ? raw.slice(1) : (wildcard ? raw.slice(2) : raw);
+    try {
+      const host = new URL(core.startsWith('http://') || core.startsWith('https://') ? core : `https://${core}`)
+        .hostname
+        .toLowerCase();
+      if (!host) return '';
+      if (exact) return `=${host}`;
+      if (wildcard) return `*.${host}`;
+      return host;
+    } catch {
+      return core
+        .replace(/^[a-z]+:\/\//, '')
+        .replace(/\/.*$/, '')
+        .replace(/:\d+$/, '')
+        .trim();
+    }
+  };
+  const isHostAllowed = (host, patterns, domainScopeMode) => {
+    const normalizedHost = String(host || '').trim().toLowerCase();
+    if (!normalizedHost) return false;
+    const rules = Array.isArray(patterns) ? patterns.map(normalizeDomainPattern).filter(Boolean) : [];
+    if (!rules.length) return true;
+    return rules.some(pattern => {
+      if (pattern === '*') return true;
+      if (pattern.startsWith('=')) return normalizedHost === pattern.slice(1);
+      if (pattern.startsWith('*.')) {
+        const suffix = pattern.slice(2);
+        return normalizedHost.length > suffix.length && normalizedHost.endsWith(`.${suffix}`);
+      }
+      if (domainScopeMode === 'host_only') return normalizedHost === pattern;
+      return normalizedHost === pattern || normalizedHost.endsWith(`.${pattern}`);
+    });
+  };
 
   const currentHost = String(location.hostname || '').toLowerCase();
   const allowed = Array.isArray(state.allowedDomains) ? state.allowedDomains : [];
   const explicitHost = String(state.targetHost || '').toLowerCase();
-  if (explicitHost && explicitHost !== currentHost) {
+  if (allowed.length) {
+    if (!isHostAllowed(currentHost, allowed, state.domainScopeMode)) return;
+  } else if (explicitHost && !isHostAllowed(currentHost, [explicitHost], 'host_only')) {
     return;
   }
+  window.__ROVER_PREVIEW_HELPER_BOOTSTRAPPED__ = true;
 
   const launchUrl = String(state.launchUrl || '').trim();
   if (launchUrl) {

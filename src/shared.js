@@ -1,4 +1,8 @@
 export const STORAGE_KEY_PREFIX = 'rover-preview-helper:tab:';
+export const INJECT_DEBOUNCE_MS = 1500;
+export const INJECT_STORM_WINDOW_MS = 60_000;
+export const INJECT_STORM_THRESHOLD = 5;
+export const SELF_REWRITE_WINDOW_MS = 5000;
 export const PREVIEW_ID_PARAM = 'rover_preview_id';
 export const PREVIEW_TOKEN_PARAM = 'rover_preview_token';
 export const PREVIEW_API_PARAM = 'rover_preview_api';
@@ -330,4 +334,149 @@ export function encodeHelperConfigFragment(config) {
     ? new TextEncoder().encode(json)
     : Uint8Array.from(Buffer.from(json, 'utf8'));
   return `${HELPER_PAYLOAD_FRAGMENT_PARAM}=${encodeBase64Url(bytes)}`;
+}
+
+// A document keeps its booted Rover instance for its whole lifetime: the
+// bootstrap guard bails on a second run, so re-injecting the bundle can never
+// deliver new config — it only re-evaluates ~1.26 MB on the page main thread
+// and replaces window.rover, orphaning the live instance. Skip whenever the
+// probe says the document already bootstrapped, regardless of signature.
+//
+// A bootstrap that ran but BAILED (host-allow check) leaves bootstrapped=false
+// but attempted=true. The hostname can't change within a document, so retrying
+// the same config would bail forever — skip it. A different signature means new
+// config (e.g. corrected allowedDomains from an explicit inject) that may pass
+// the host check, so it gets one fresh attempt.
+export function shouldSkipInjectForProbe(probe, signature) {
+  if (!probe) return false;
+  if (probe.bootstrapped === true) return true;
+  return probe.attempted === true && String(probe.signature || '') === String(signature || '');
+}
+
+// CSP is only relaxed *reactively* — when the page fires a real
+// `securitypolicyviolation` that is attributable to Rover. content-start.js relays
+// those to the background as this message.
+export const CSP_BLOCKED_MESSAGE = 'ROVER_PREVIEW_HELPER_CSP_BLOCKED';
+
+// Hosts Rover's runtime talks to / loads assets from. A CSP violation whose
+// blockedURI resolves to one of these is Rover's, not the site's own traffic.
+export const ROVER_HOSTS = [
+  'agent.rtrvr.ai',
+  'extensionrouter.rtrvr.ai',
+  'roverbook.rtrvr.ai',
+  'rover.rtrvr.ai',
+  'www.rtrvr.ai',
+];
+
+// Rover boots a blob: module worker; a CSP block on creating it reports one of these
+// directives with a blob/empty blockedURI (never a real host). Rover's own script is
+// injected via executeScript, which bypasses script-src, so script-src/inline/eval
+// violations are always the site's own and must NOT be attributed to Rover.
+export const ROVER_WORKER_DIRECTIVES = ['worker-src', 'child-src', 'default-src'];
+
+// Decide whether a securitypolicyviolation is caused by Rover (so we should relax the
+// page CSP) rather than by the host site's own blocked traffic. Only enforced (not
+// report-only) violations count.
+export function isRoverCspViolation({ blockedURI, effectiveDirective, disposition } = {}, options = {}) {
+  if (disposition !== 'enforce') return false;
+  const raw = String(blockedURI || '').toLowerCase().trim();
+  const directive = String(effectiveDirective || '').toLowerCase().trim();
+  const isWorkerLike = raw === ''
+    || raw === 'blob'
+    || raw.startsWith('blob:')
+    || raw.startsWith('chrome-extension:');
+  if (isWorkerLike && ROVER_WORKER_DIRECTIVES.includes(directive)) return true;
+
+  const host = normalizeHost(blockedURI);
+  if (host) {
+    const extraHosts = Array.isArray(options.extraHosts) ? options.extraHosts : [];
+    const roverHosts = [...ROVER_HOSTS, ...extraHosts]
+      .map(item => String(item || '').trim().toLowerCase())
+      .filter(Boolean);
+    return roverHosts.some(rover => host === rover || host.endsWith(`.${rover}`));
+  }
+  // No real host → a keyword/blob/empty source. Only Rover's blob worker qualifies.
+  return false;
+}
+
+// Bounded escalation ladder for a blocked tab: strip the CSP response header (DNR),
+// then also attach chrome.debugger + Page.setBypassCSP (covers <meta> CSP), then give
+// up. A <meta> CSP can't be header-stripped, so meta sites jump straight to DNR+CDP.
+export const CSP_LEVEL = {
+  NONE: 'none',
+  DNR: 'dnr',
+  DNR_CDP: 'dnr_cdp',
+  FAILED: 'failed',
+};
+
+export function nextEscalationLevel(current, { hasMetaCsp = false } = {}) {
+  const level = current || CSP_LEVEL.NONE;
+  if (level === CSP_LEVEL.NONE) {
+    return hasMetaCsp
+      ? { level: CSP_LEVEL.DNR_CDP, enableDnr: true, attachCdp: true, failed: false }
+      : { level: CSP_LEVEL.DNR, enableDnr: true, attachCdp: false, failed: false };
+  }
+  if (level === CSP_LEVEL.DNR) {
+    return { level: CSP_LEVEL.DNR_CDP, enableDnr: false, attachCdp: true, failed: false };
+  }
+  // DNR_CDP (or already FAILED) → nothing stronger is available.
+  return { level: CSP_LEVEL.FAILED, enableDnr: false, attachCdp: false, failed: true };
+}
+
+export function shouldDebounceInject(record, signature, nowMs, debounceMs = INJECT_DEBOUNCE_MS) {
+  if (!record || record.signature !== signature) return false;
+  return Number.isFinite(record.lastInjectAt) && nowMs - record.lastInjectAt < debounceMs;
+}
+
+export function recordInjectAttempt(prev, nowMs, windowMs = INJECT_STORM_WINDOW_MS) {
+  if (!prev || !Number.isFinite(prev.windowStartMs) || nowMs - prev.windowStartMs >= windowMs) {
+    return { windowStartMs: nowMs, count: 1 };
+  }
+  return { windowStartMs: prev.windowStartMs, count: (prev.count || 0) + 1 };
+}
+
+export function isInjectStorm(stats, threshold = INJECT_STORM_THRESHOLD) {
+  return Boolean(stats && stats.count > threshold);
+}
+
+// Circuit breaker on top of the storm detector: once a tab trips the storm
+// threshold, stop injecting entirely until the storm window expires. The
+// window is anchored at windowStartMs, so the circuit closes on its own and
+// the next inject starts a fresh window. An explicit popup inject clears the
+// stats and bypasses this.
+export function isInjectCircuitOpen(stats, nowMs, {
+  threshold = INJECT_STORM_THRESHOLD,
+  windowMs = INJECT_STORM_WINDOW_MS,
+} = {}) {
+  if (!isInjectStorm(stats, threshold)) return false;
+  return Number.isFinite(stats.windowStartMs) && nowMs - stats.windowStartMs < windowMs;
+}
+
+// Budget on CSP-escalation reloads per tab. Each escalation rung reloads the
+// tab; a workflow that hops hosts re-climbs the ladder per host, and with the
+// MV3 service worker torn down between hops the in-memory guard is lost — so
+// the budget persists in storage.session. Same fixed-window shape as
+// recordInjectAttempt.
+export const CSP_RELOAD_BUDGET_WINDOW_MS = 5 * 60_000;
+export const CSP_RELOAD_BUDGET_MAX = 6;
+
+export function recordCspReload(prev, nowMs, windowMs = CSP_RELOAD_BUDGET_WINDOW_MS) {
+  if (!prev || !Number.isFinite(prev.windowStartMs) || nowMs - prev.windowStartMs >= windowMs) {
+    return { windowStartMs: nowMs, count: 1 };
+  }
+  return { windowStartMs: prev.windowStartMs, count: (prev.count || 0) + 1 };
+}
+
+export function isCspReloadBudgetExceeded(stats, nowMs, {
+  max = CSP_RELOAD_BUDGET_MAX,
+  windowMs = CSP_RELOAD_BUDGET_WINDOW_MS,
+} = {}) {
+  if (!stats || !Number.isFinite(stats.windowStartMs)) return false;
+  if (nowMs - stats.windowStartMs >= windowMs) return false;
+  return (stats.count || 0) >= max;
+}
+
+export function isRecentSelfRewrite(entry, url, nowMs, windowMs = SELF_REWRITE_WINDOW_MS) {
+  if (!entry || !entry.url || entry.url !== String(url || '')) return false;
+  return Number.isFinite(entry.ts) && nowMs - entry.ts < windowMs;
 }
