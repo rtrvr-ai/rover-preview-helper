@@ -436,6 +436,22 @@ async function noteFullInject(tabId, reason) {
   }
 }
 
+// A manifest document_start content script is only installed on documents loaded
+// after the extension was installed/reloaded. Users commonly reload an unpacked
+// helper and then inject into an already-open target tab; without this explicit
+// ensure, Rover runs but no listener exists to relay its first connect-src CSP
+// violation, so the reactive DNR/CDP ladder never starts. content-start.js guards
+// its setup in the isolated world, making this safe when the manifest path already
+// ran or races with us during navigation.
+async function ensureContentStartSensor(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId, allFrames: false },
+    world: 'ISOLATED',
+    injectImmediately: true,
+    files: ['src/content-start.js'],
+  });
+}
+
 async function injectMainWorldState(tabId, state, reason = 'unknown') {
   if (!state) return false;
   const signature = `${state.siteId}:${state.publicKey || ''}:${state.sessionToken || ''}:${state.launchUrl || state.requestId || ''}:${state.attachToken || ''}`;
@@ -464,6 +480,11 @@ async function injectMainWorldState(tabId, state, reason = 'unknown') {
   const inFlight = (async () => {
     let claimed = false;
     try {
+      // Install the reactive CSP relay before Rover can make its first request.
+      // This also repairs already-open tabs that missed manifest content-script
+      // registration after an extension update/reload.
+      await ensureContentStartSensor(tabId);
+
     // A booted document can't accept new config anyway (the bootstrap guard
     // bails), and re-evaluating the bundle would replace window.rover and orphan
     // the live instance — so one tiny probe decides instead of a 1.26 MB eval.
@@ -537,7 +558,12 @@ async function injectMainWorldState(tabId, state, reason = 'unknown') {
   }
 }
 
-export { injectMainWorldState, probeAndClaimMainWorld, releaseFailedMainWorldClaim };
+export {
+  ensureContentStartSensor,
+  injectMainWorldState,
+  probeAndClaimMainWorld,
+  releaseFailedMainWorldClaim,
+};
 
 // Inject Rover into a tab, first ensuring the page CSP won't block its egress.
 // The CSP relaxation only takes effect on the next document load, so the first

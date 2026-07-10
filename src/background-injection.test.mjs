@@ -11,6 +11,7 @@ function chromeEvent() {
 
 const page = {};
 const counters = {
+  sensorEnsures: 0,
   coreEvaluations: 0,
   workers: 0,
   bridges: 0,
@@ -78,6 +79,10 @@ globalThis.chrome = {
         }
       }
       const file = details.files?.[0];
+      if (file === 'src/content-start.js') {
+        counters.sensorEnsures += 1;
+        return [];
+      }
       if (file === 'src/main-world-bootstrap.js') {
         counters.bootstrapEvaluations += 1;
         page.__ROVER_PREVIEW_HELPER_BOOTSTRAP_ATTEMPTED__ = true;
@@ -137,12 +142,26 @@ test('PAGE_READY/update/history/explicit races evaluate one core and one runtime
 
   assert.deepEqual(results, [true, true, true, true]);
   assert.deepEqual(counters, {
+    sensorEnsures: 1,
     coreEvaluations: 1,
     workers: 1,
     bridges: 1,
     listenerRegistries: 1,
     bootstrapEvaluations: 1,
   });
+});
+
+test('an already-open tab gets the CSP sensor before Rover evaluates', async () => {
+  delete page.__ROVER_PREVIEW_HELPER_BOOTSTRAPPED__;
+  delete page.__ROVER_PREVIEW_HELPER_BOOTSTRAP_ATTEMPTED__;
+  delete page.__ROVER_PREVIEW_HELPER_INJECTING__;
+  delete page.__ROVER_PREVIEW_HELPER_SIGNATURE__;
+  Object.keys(counters).forEach(key => { counters[key] = 0; });
+
+  const state = { siteId: 'site-sensor', publicKey: 'pk', requestId: 'request-sensor' };
+  assert.equal(await injectMainWorldState(44, state, 'popup_inject'), true);
+  assert.equal(counters.sensorEnsures, 1);
+  assert.equal(counters.coreEvaluations, 1);
 });
 
 test('partial injection failure releases claim and permits immediate retry', async () => {

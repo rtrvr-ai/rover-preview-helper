@@ -1,4 +1,13 @@
 (() => {
+  // Manifest content scripts are not retroactively installed into tabs that were
+  // already open when an unpacked extension was installed or reloaded. The
+  // background therefore also executes this file immediately before injecting
+  // Rover. Keep the whole setup idempotent so the manifest and dynamic paths can
+  // safely race without registering duplicate CSP/message listeners.
+  const INSTALL_KEY = '__ROVER_PREVIEW_HELPER_CONTENT_START_INSTALLED__';
+  if (globalThis[INSTALL_KEY] === true) return;
+  globalThis[INSTALL_KEY] = true;
+
   const availabilityMessage = {
     type: 'ROVER_PREVIEW_HELPER_AVAILABLE',
     source: 'rover-preview-helper',
@@ -30,8 +39,8 @@
   // Reactive CSP sensor. Rover runs in the page's world, so a strict page CSP can
   // block its egress/worker/assets. We do NOT relax CSP up front — we watch for a
   // real securitypolicyviolation and let the background decide whether it's Rover's
-  // and escalate the bypass only then. This listener runs at document_start, before
-  // Rover is injected, so it never misses the first violation.
+  // and escalate the bypass only then. The manifest installs this at document_start,
+  // and the background also ensures it is present before Rover is injected.
   const hasMetaCsp = () => {
     try {
       return Array.prototype.some.call(

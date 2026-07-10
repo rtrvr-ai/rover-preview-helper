@@ -164,6 +164,11 @@ or its worker) and the tab is still inside the saved `allowedDomains` policy, it
 the background, which climbs a bounded per-tab/host ladder and reloads once so the
 relaxation applies to a clean load:
 
+The background also ensures this sensor immediately before every real Rover injection.
+That covers target tabs that were already open when an unpacked helper was installed or
+reloaded, because Chrome does not retroactively add manifest content scripts to those
+existing documents.
+
 1. **`declarativeNetRequest`** strips the `Content-Security-Policy` response header
    for that tab only (`src/csp-bypass.js`).
 2. If the site ships its policy in a `<meta http-equiv="Content-Security-Policy">`
