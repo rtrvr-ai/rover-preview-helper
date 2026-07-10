@@ -106,6 +106,23 @@ test('normalizeConfig exposes default action spotlight in helper configs', () =>
   });
 });
 
+test('normalizeConfig preserves all supported background-tab rollback modes', () => {
+  for (const backgroundTabs of ['identity', 'digest_unchanged', 'full']) {
+    const config = normalizeConfig({
+      siteId: 'site',
+      publicKey: 'pk',
+      pageConfig: { disableAutoScroll: false, backgroundTabs },
+    });
+    assert.deepEqual(config.pageConfig, { disableAutoScroll: false, backgroundTabs });
+  }
+  const invalid = normalizeConfig({
+    siteId: 'site',
+    publicKey: 'pk',
+    pageConfig: { backgroundTabs: 'everything' },
+  });
+  assert.deepEqual(invalid.pageConfig, { disableAutoScroll: true });
+});
+
 test('isHostAllowed allows any host with wildcard *', () => {
   assert.ok(isHostAllowed('www.rtrvr.ai', ['*'], 'registrable_domain'));
   assert.ok(isHostAllowed('anything.example.com', ['*'], 'host_only'));

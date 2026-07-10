@@ -5,6 +5,8 @@ import path from 'node:path';
 import {
   DEFAULT_ROVER_EMBED_BASE,
   looksLikeRoverRuntime,
+  RUNTIME_MANIFEST_VERSION,
+  sha256,
   vendorBase,
   vendorTargets,
 } from './vendor.mjs';
@@ -16,6 +18,14 @@ test('vendorBase defaults to prod and honors ROVER_EMBED_BASE', () => {
   assert.equal(vendorBase({ ROVER_EMBED_BASE: 'https://staging.rtrvr.ai/' }), 'https://staging.rtrvr.ai');
   // Blank/whitespace falls back to the default.
   assert.equal(vendorBase({ ROVER_EMBED_BASE: '   ' }), DEFAULT_ROVER_EMBED_BASE);
+});
+
+test('runtime manifest v2 uses stable SHA-256 identities', () => {
+  assert.equal(RUNTIME_MANIFEST_VERSION, 2);
+  assert.equal(
+    sha256('rover'),
+    'b0c5f417a5a9c8af7e19cfb341d9fad0869baa9d473652fcba4ae5a872db6b30',
+  );
 });
 
 test('vendorTargets maps embed + worker to the right URLs and dist paths', () => {

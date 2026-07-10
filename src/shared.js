@@ -83,10 +83,14 @@ function normalizeUiConfig(value) {
 
 function normalizePageConfig(value) {
   if (!value || typeof value !== 'object') return undefined;
+  const pageConfig = {};
   if (typeof value.disableAutoScroll === 'boolean') {
-    return { disableAutoScroll: value.disableAutoScroll };
+    pageConfig.disableAutoScroll = value.disableAutoScroll;
   }
-  return undefined;
+  if (value.backgroundTabs === 'identity' || value.backgroundTabs === 'digest_unchanged' || value.backgroundTabs === 'full') {
+    pageConfig.backgroundTabs = value.backgroundTabs;
+  }
+  return Object.keys(pageConfig).length ? pageConfig : undefined;
 }
 
 function encodeBase64Url(bytes) {

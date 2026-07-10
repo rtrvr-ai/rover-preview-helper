@@ -109,10 +109,15 @@
   if (typeof state.cloudSandboxEnabled === 'boolean') {
     bootConfig.cloudSandboxEnabled = state.cloudSandboxEnabled;
   }
-  if (state.pageConfig && typeof state.pageConfig === 'object' && typeof state.pageConfig.disableAutoScroll === 'boolean') {
-    bootConfig.pageConfig = {
-      disableAutoScroll: state.pageConfig.disableAutoScroll,
-    };
+  if (state.pageConfig && typeof state.pageConfig === 'object') {
+    const pageConfig = {};
+    if (typeof state.pageConfig.disableAutoScroll === 'boolean') {
+      pageConfig.disableAutoScroll = state.pageConfig.disableAutoScroll;
+    }
+    if (['identity', 'digest_unchanged', 'full'].includes(state.pageConfig.backgroundTabs)) {
+      pageConfig.backgroundTabs = state.pageConfig.backgroundTabs;
+    }
+    if (Object.keys(pageConfig).length) bootConfig.pageConfig = pageConfig;
   }
   if (state.ui && typeof state.ui === 'object') {
     const voice = state.ui.voice;

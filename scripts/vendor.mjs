@@ -1,11 +1,17 @@
 import { mkdir, copyFile, readFile, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 const root = new URL('..', import.meta.url);
 const rootDir = path.resolve(root.pathname);
 
 export const DEFAULT_ROVER_EMBED_BASE = 'https://rover.rtrvr.ai';
 export const CACHE_DIR = path.join(rootDir, '.rover-vendor-cache');
+export const RUNTIME_MANIFEST_VERSION = 2;
+
+export function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
 
 /**
  * Source origin for the Rover runtime files. Override with ROVER_EMBED_BASE to
@@ -112,6 +118,21 @@ async function downloadTarget(target) {
   throw new Error(errors.join('; '));
 }
 
+async function downloadRuntimeManifest(base) {
+  const url = `${base}/rover-artifacts-manifest.json`;
+  const response = await fetch(url, { cache: 'no-store', redirect: 'follow' });
+  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
+  const payload = await response.json();
+  if (!payload || typeof payload !== 'object' || !payload.files || typeof payload.files !== 'object') {
+    throw new Error(`invalid Rover artifact manifest from ${url}`);
+  }
+  return { payload, url };
+}
+
+function targetManifestKey(target) {
+  return target.name === 'embed' ? 'embed-core.js' : 'worker/worker.js';
+}
+
 /**
  * Ensure each runtime file is present in the local cache, then copy it into
  * dist/vendor. With `refresh`, re-download the latest from prod (falling back to
@@ -130,6 +151,13 @@ export async function vendorRoverRuntime(options = {}) {
 
   const base = vendorBase();
   const targets = vendorTargets(base, distDir);
+  let upstreamManifest = null;
+  let upstreamManifestUrl = '';
+  if (refresh) {
+    const downloadedManifest = await downloadRuntimeManifest(base);
+    upstreamManifest = downloadedManifest.payload;
+    upstreamManifestUrl = downloadedManifest.url;
+  }
   await mkdir(CACHE_DIR, { recursive: true });
   await mkdir(path.join(distDir, 'vendor'), { recursive: true });
 
@@ -164,10 +192,26 @@ export async function vendorRoverRuntime(options = {}) {
 
     await copyFile(target.cacheFile, target.distFile);
     const bytes = (await stat(target.distFile)).size;
+    const body = await readFile(target.distFile);
+    const digest = sha256(body);
+    const manifestEntry = upstreamManifest?.files?.[targetManifestKey(target)];
+    if (refresh && !manifestEntry) {
+      throw new Error(`Website Rover manifest is missing ${targetManifestKey(target)}.`);
+    }
+    if (manifestEntry) {
+      const expectedSha = String(manifestEntry.sha256 || '').trim().toLowerCase();
+      const expectedBytes = Number(manifestEntry.bytes);
+      if (expectedSha !== digest || expectedBytes !== bytes) {
+        throw new Error(
+          `Website Rover parity mismatch for ${target.name}: expected ${expectedSha}/${expectedBytes}, got ${digest}/${bytes}.`,
+        );
+      }
+    }
     manifestFiles.push({
       name: target.name,
       file: path.basename(target.distFile),
-      url: sourceUrl || target.url,
+      sourceUrl: sourceUrl || target.url,
+      sha256: digest,
       bytes,
       etag,
       lastModified,
@@ -176,10 +220,20 @@ export async function vendorRoverRuntime(options = {}) {
   }
 
   const versionPath = path.join(distDir, 'vendor', 'VERSION.json');
+  const extensionManifest = JSON.parse(await readFile(path.join(rootDir, 'manifest.json'), 'utf8'));
+  const versionManifest = {
+    version: RUNTIME_MANIFEST_VERSION,
+    extensionManifestVersion: String(extensionManifest.version || ''),
+    roverSourceCommit: String(upstreamManifest?.sourceCommit || process.env.ROVER_SOURCE_COMMIT || '').trim(),
+    source: base,
+    sourceManifestUrl: upstreamManifestUrl || undefined,
+    fetchedAt: now,
+    files: manifestFiles,
+  };
   await writeFile(
     versionPath,
-    `${JSON.stringify({ source: base, fetchedAt: now, files: manifestFiles }, null, 2)}\n`,
+    `${JSON.stringify(versionManifest, null, 2)}\n`,
   );
 
-  return { base, files: manifestFiles };
+  return { base, files: manifestFiles, manifest: versionManifest };
 }

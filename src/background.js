@@ -394,6 +394,33 @@ async function probeAndClaimMainWorld(tabId, signature) {
   }
 }
 
+async function releaseFailedMainWorldClaim(tabId, signature) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: false },
+      world: 'MAIN',
+      injectImmediately: true,
+      func: sig => {
+        if (window.__ROVER_PREVIEW_HELPER_BOOTSTRAPPED__ === true) return false;
+        const expected = String(sig || '');
+        const activeSignature = String(window.__ROVER_PREVIEW_HELPER_SIGNATURE__ || '');
+        const claimSignature = String(window.__ROVER_PREVIEW_HELPER_INJECTING__?.signature || '');
+        if (activeSignature && activeSignature !== expected) return false;
+        if (claimSignature && claimSignature !== expected) return false;
+        delete window.__ROVER_PREVIEW_HELPER_INJECTING__;
+        // The bootstrap sets ATTEMPTED before the large runtime evaluates. If
+        // that file evaluation fails, retaining ATTEMPTED would permanently
+        // suppress a same-signature retry even though no Rover instance exists.
+        delete window.__ROVER_PREVIEW_HELPER_BOOTSTRAP_ATTEMPTED__;
+        return true;
+      },
+      args: [String(signature || '')],
+    });
+  } catch {
+    // The document may have navigated away; its claim disappears with it.
+  }
+}
+
 async function noteFullInject(tabId, reason) {
   const stats = recordInjectAttempt(injectStats.get(tabId), Date.now());
   injectStats.set(tabId, stats);
@@ -435,6 +462,8 @@ async function injectMainWorldState(tabId, state, reason = 'unknown') {
   };
 
   const inFlight = (async () => {
+    let claimed = false;
+    try {
     // A booted document can't accept new config anyway (the bootstrap guard
     // bails), and re-evaluating the bundle would replace window.rover and orphan
     // the live instance — so one tiny probe decides instead of a 1.26 MB eval.
@@ -454,6 +483,7 @@ async function injectMainWorldState(tabId, state, reason = 'unknown') {
       });
       return true;
     }
+    claimed = true;
 
     await noteFullInject(tabId, reason);
 
@@ -487,18 +517,27 @@ async function injectMainWorldState(tabId, state, reason = 'unknown') {
     });
 
     return true;
+    } catch (error) {
+      if (claimed) await releaseFailedMainWorldClaim(tabId, signature);
+      throw error;
+    }
   })();
 
   injectControl.set(tabId, { signature, inFlight, lastInjectAt: Date.now() });
+  let succeeded = false;
   try {
-    return await inFlight;
+    const result = await inFlight;
+    succeeded = result === true;
+    return result;
   } finally {
     const current = injectControl.get(tabId);
     if (current && current.inFlight === inFlight) {
-      injectControl.set(tabId, { signature, inFlight: null, lastInjectAt: Date.now() });
+      injectControl.set(tabId, { signature, inFlight: null, lastInjectAt: succeeded ? Date.now() : 0 });
     }
   }
 }
+
+export { injectMainWorldState, probeAndClaimMainWorld, releaseFailedMainWorldClaim };
 
 // Inject Rover into a tab, first ensuring the page CSP won't block its egress.
 // The CSP relaxation only takes effect on the next document load, so the first
