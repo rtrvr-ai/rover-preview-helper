@@ -126,8 +126,10 @@ package, not be fetched as remote code.
 
 To avoid this, `pnpm build` packages the Rover runtime into the extension:
 
-- it downloads the full SDK core (`embed-core.js`) and `worker/worker.js` from
-  prod into `dist/vendor/` (`rover-embed.js` and `worker.js`), and writes
+- it resolves the immutable, content-addressed SDK core from the production
+  artifact manifest, downloads it plus `worker/worker.js`, verifies both by
+  SHA-256 and byte length, and stores them in `dist/vendor/` (`rover-embed.js`
+  and `worker.js`); it writes
   `dist/vendor/VERSION.json` with the source, byte sizes, and ETags for
   traceability;
 - the background worker injects `vendor/rover-embed.js` with
@@ -138,9 +140,9 @@ To avoid this, `pnpm build` packages the Rover runtime into the extension:
 Build behavior:
 
 - a plain `pnpm build` re-downloads the latest runtime from prod every run;
-- if the network is unavailable it reuses the last cached copy (in
-  `.rover-vendor-cache/`) with a warning, and only fails if there is neither a
-  cache nor a network;
+- if the network is unavailable it reuses the last manifest-verified copies (in
+  `.rover-vendor-cache/`) with a warning, and only fails if there is no complete,
+  internally consistent cached release;
 - `pnpm dev` (watch mode) reuses the cache so rebuilds stay instant and offline;
 - set `ROVER_EMBED_BASE` to vendor from a staging deploy instead of prod.
 

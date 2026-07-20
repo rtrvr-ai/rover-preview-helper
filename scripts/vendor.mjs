@@ -1,4 +1,4 @@
-import { mkdir, copyFile, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, copyFile, readFile, rename, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -22,11 +22,16 @@ export function vendorBase(env = process.env) {
   return (raw || DEFAULT_ROVER_EMBED_BASE).replace(/\/+$/, '');
 }
 
+export function vendorCacheDir(base = vendorBase()) {
+  return path.join(CACHE_DIR, sha256(base).slice(0, 16));
+}
+
 /**
  * The exact runtime files we package, with download URL, on-disk cache path, and
  * the destination inside dist/. Pure: no IO, easy to unit-test.
  */
 export function vendorTargets(base = vendorBase(), distDir = path.join(rootDir, 'dist')) {
+  const cacheDir = vendorCacheDir(base);
   return [
     {
       // The extension injects this file with chrome.scripting.executeScript.
@@ -34,14 +39,13 @@ export function vendorTargets(base = vendorBase(), distDir = path.join(rootDir, 
       // to derive embed-core.js from a real <script src> element.
       name: 'embed',
       url: `${base}/embed-core.js`,
-      fallbackUrls: [`${base}/embed.js`],
-      cacheFile: path.join(CACHE_DIR, 'rover-embed.js'),
+      cacheFile: path.join(cacheDir, 'rover-embed.js'),
       distFile: path.join(distDir, 'vendor', 'rover-embed.js'),
     },
     {
       name: 'worker',
       url: `${base}/worker/worker.js`,
-      cacheFile: path.join(CACHE_DIR, 'worker.js'),
+      cacheFile: path.join(cacheDir, 'worker.js'),
       distFile: path.join(distDir, 'vendor', 'worker.js'),
     },
   ];
@@ -66,9 +70,9 @@ export function looksLikeRoverRuntime(name, text) {
   const hasAny = markers => markers.some(marker => body.includes(marker));
 
   if (name === 'embed') {
-    return hasAll(['__roverSDK', '__ROVER_SCRIPT_URL__'])
-      && hasAny(['window.rover', 'installGlobal', 'createRoverScriptTagSnippet'])
-      && hasAll(['agent.rtrvr.ai', 'data-rover-methods']);
+    return hasAll(['__ROVER_SCRIPT_URL__', 'agent.rtrvr.ai', 'data-rover-methods'])
+      && hasAny(['/v2/rover', 'session/open'])
+      && !hasAny(['data-rover-core-loader', 'embed-manifest.json']);
   }
   if (name === 'worker') {
     return hasAny(['self.onmessage', 'addEventListener("message"', "addEventListener('message'"])
@@ -86,30 +90,81 @@ async function fileExists(filePath) {
   }
 }
 
-async function downloadUrl(target, url) {
+function normalizeManifestEntry(manifest, key) {
+  const entry = manifest?.files?.[key];
+  if (!entry || typeof entry !== 'object') return null;
+  const digest = String(entry.sha256 || '').trim().toLowerCase();
+  const bytes = Number(entry.bytes);
+  if (!/^[a-f0-9]{64}$/.test(digest) || !Number.isSafeInteger(bytes) || bytes <= 0) {
+    throw new Error(`Website Rover manifest has an invalid identity for ${key}.`);
+  }
+  return { key, sha256: digest, bytes };
+}
+
+/**
+ * Resolve the immutable runtime object and its deployment-manifest identity.
+ * The manifest identity is stronger and more future-proof than minifier-sensitive
+ * source markers. The stable alias remains a retry only for older deployments.
+ */
+export function resolveTargetArtifact(target, manifest, base = vendorBase()) {
+  const stableKey = targetManifestKey(target);
+  const stable = normalizeManifestEntry(manifest, stableKey);
+  if (!stable) throw new Error(`Website Rover manifest is missing ${stableKey}.`);
+
+  let immutable = null;
+  if (target.name === 'embed') {
+    const revision = String(manifest?.runtimeRevision || '').trim();
+    if (/^[a-f0-9]{12}$/i.test(revision)) {
+      const candidate = normalizeManifestEntry(manifest, `embed-core.${revision}.js`);
+      if (candidate) {
+        if (candidate.sha256 !== stable.sha256 || candidate.bytes !== stable.bytes) {
+          throw new Error('Website Rover manifest core alias and immutable artifact disagree.');
+        }
+        immutable = candidate;
+      }
+    }
+  }
+
+  const selected = immutable || stable;
+  const urls = [...new Set([
+    `${base}/${selected.key}`,
+    `${base}/${stable.key}`,
+  ])];
+  return { ...selected, stableKey, urls };
+}
+
+async function downloadUrl(target, url, expected) {
   const response = await fetch(url, { cache: 'no-store', redirect: 'follow' });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} ${response.statusText}`);
   }
-  const text = await response.text();
-  if (!looksLikeRoverRuntime(target.name, text)) {
+  const body = Buffer.from(await response.arrayBuffer());
+  const digest = sha256(body);
+  if (expected) {
+    if (body.byteLength !== expected.bytes || digest !== expected.sha256) {
+      throw new Error(
+        `downloaded body from ${url} failed manifest verification: expected `
+        + `${expected.sha256}/${expected.bytes}, got ${digest}/${body.byteLength}`,
+      );
+    }
+  } else if (!looksLikeRoverRuntime(target.name, body.toString('utf8'))) {
     throw new Error(`downloaded body from ${url} did not look like the Rover runtime`);
   }
   return {
-    text,
+    body,
     url,
     etag: response.headers.get('etag') || '',
     lastModified: response.headers.get('last-modified') || '',
   };
 }
 
-async function downloadTarget(target) {
-  const urls = [target.url, ...(target.fallbackUrls || [])];
+async function downloadTarget(target, artifact) {
+  const urls = artifact?.urls || [target.url];
   const errors = [];
 
   for (const url of urls) {
     try {
-      return await downloadUrl(target, url);
+      return await downloadUrl(target, url, artifact);
     } catch (error) {
       errors.push(`${url}: ${error?.message || error}`);
     }
@@ -118,15 +173,36 @@ async function downloadTarget(target) {
   throw new Error(errors.join('; '));
 }
 
+async function readFileIdentity(filePath) {
+  const body = await readFile(filePath);
+  return { sha256: sha256(body), bytes: body.byteLength };
+}
+
+async function writeFileAtomically(filePath, body) {
+  const tempPath = `${filePath}.${process.pid}.tmp`;
+  await writeFile(tempPath, body);
+  await rename(tempPath, filePath);
+}
+
 async function downloadRuntimeManifest(base) {
   const url = `${base}/rover-artifacts-manifest.json`;
   const response = await fetch(url, { cache: 'no-store', redirect: 'follow' });
   if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
   const payload = await response.json();
-  if (!payload || typeof payload !== 'object' || !payload.files || typeof payload.files !== 'object') {
-    throw new Error(`invalid Rover artifact manifest from ${url}`);
-  }
+  validateRuntimeManifestPayload(payload, url);
   return { payload, url };
+}
+
+function validateRuntimeManifestPayload(payload, source) {
+  if (!payload || typeof payload !== 'object' || !payload.files || typeof payload.files !== 'object') {
+    throw new Error(`invalid Rover artifact manifest from ${source}`);
+  }
+}
+
+async function readCachedRuntimeManifest(base, manifestCacheFile) {
+  const payload = JSON.parse(await readFile(manifestCacheFile, 'utf8'));
+  validateRuntimeManifestPayload(payload, manifestCacheFile);
+  return { payload, url: `${base}/rover-artifacts-manifest.json` };
 }
 
 function targetManifestKey(target) {
@@ -150,21 +226,43 @@ export async function vendorRoverRuntime(options = {}) {
   } = options;
 
   const base = vendorBase();
+  const cacheDir = vendorCacheDir(base);
+  const manifestCacheFile = path.join(cacheDir, 'rover-artifacts-manifest.json');
   const targets = vendorTargets(base, distDir);
   let upstreamManifest = null;
   let upstreamManifestUrl = '';
+  await mkdir(cacheDir, { recursive: true });
   if (refresh) {
-    const downloadedManifest = await downloadRuntimeManifest(base);
-    upstreamManifest = downloadedManifest.payload;
-    upstreamManifestUrl = downloadedManifest.url;
+    try {
+      const downloadedManifest = await downloadRuntimeManifest(base);
+      upstreamManifest = downloadedManifest.payload;
+      upstreamManifestUrl = downloadedManifest.url;
+      await writeFileAtomically(
+        manifestCacheFile,
+        `${JSON.stringify(upstreamManifest, null, 2)}\n`,
+      );
+    } catch (error) {
+      if (!(await fileExists(manifestCacheFile))) {
+        throw new Error(
+          `Failed to download the Rover artifact manifest: ${error?.message || error}. `
+          + 'No cached manifest exists. Connect to the network (or set ROVER_EMBED_BASE) and rebuild.',
+        );
+      }
+      const cachedManifest = await readCachedRuntimeManifest(base, manifestCacheFile);
+      upstreamManifest = cachedManifest.payload;
+      upstreamManifestUrl = cachedManifest.url;
+      log(`  ! manifest: ${error?.message || error} — reusing cached manifest.`);
+    }
   }
-  await mkdir(CACHE_DIR, { recursive: true });
   await mkdir(path.join(distDir, 'vendor'), { recursive: true });
 
   const manifestFiles = [];
 
   for (const target of targets) {
     const hasCache = await fileExists(target.cacheFile);
+    const artifact = upstreamManifest
+      ? resolveTargetArtifact(target, upstreamManifest, base)
+      : null;
     let etag = '';
     let lastModified = '';
     let source = 'cache';
@@ -172,8 +270,8 @@ export async function vendorRoverRuntime(options = {}) {
 
     if (refresh || !hasCache) {
       try {
-        const downloaded = await downloadTarget(target);
-        await writeFile(target.cacheFile, downloaded.text);
+        const downloaded = await downloadTarget(target, artifact);
+        await writeFileAtomically(target.cacheFile, downloaded.body);
         etag = downloaded.etag;
         lastModified = downloaded.lastModified;
         sourceUrl = downloaded.url;
@@ -185,6 +283,15 @@ export async function vendorRoverRuntime(options = {}) {
             + 'No cached copy exists. Connect to the network (or set ROVER_EMBED_BASE) and rebuild.',
           );
         }
+        if (artifact) {
+          const cached = await readFileIdentity(target.cacheFile);
+          if (cached.sha256 !== artifact.sha256 || cached.bytes !== artifact.bytes) {
+            throw new Error(
+              `Failed to vendor ${target.name}: ${error?.message || error}. Cached artifact is stale: `
+              + `expected ${artifact.sha256}/${artifact.bytes}, got ${cached.sha256}/${cached.bytes}.`,
+            );
+          }
+        }
         log(`  ! ${target.name}: ${error?.message || error} — reusing cached copy.`);
         source = 'cache (stale)';
       }
@@ -194,16 +301,10 @@ export async function vendorRoverRuntime(options = {}) {
     const bytes = (await stat(target.distFile)).size;
     const body = await readFile(target.distFile);
     const digest = sha256(body);
-    const manifestEntry = upstreamManifest?.files?.[targetManifestKey(target)];
-    if (refresh && !manifestEntry) {
-      throw new Error(`Website Rover manifest is missing ${targetManifestKey(target)}.`);
-    }
-    if (manifestEntry) {
-      const expectedSha = String(manifestEntry.sha256 || '').trim().toLowerCase();
-      const expectedBytes = Number(manifestEntry.bytes);
-      if (expectedSha !== digest || expectedBytes !== bytes) {
+    if (artifact) {
+      if (artifact.sha256 !== digest || artifact.bytes !== bytes) {
         throw new Error(
-          `Website Rover parity mismatch for ${target.name}: expected ${expectedSha}/${expectedBytes}, got ${digest}/${bytes}.`,
+          `Website Rover parity mismatch for ${target.name}: expected ${artifact.sha256}/${artifact.bytes}, got ${digest}/${bytes}.`,
         );
       }
     }

@@ -5,9 +5,11 @@ import path from 'node:path';
 import {
   DEFAULT_ROVER_EMBED_BASE,
   looksLikeRoverRuntime,
+  resolveTargetArtifact,
   RUNTIME_MANIFEST_VERSION,
   sha256,
   vendorBase,
+  vendorCacheDir,
   vendorTargets,
 } from './vendor.mjs';
 
@@ -18,6 +20,11 @@ test('vendorBase defaults to prod and honors ROVER_EMBED_BASE', () => {
   assert.equal(vendorBase({ ROVER_EMBED_BASE: 'https://staging.rtrvr.ai/' }), 'https://staging.rtrvr.ai');
   // Blank/whitespace falls back to the default.
   assert.equal(vendorBase({ ROVER_EMBED_BASE: '   ' }), DEFAULT_ROVER_EMBED_BASE);
+});
+
+test('vendor caches are isolated by normalized runtime origin', () => {
+  assert.equal(vendorCacheDir('https://rover.rtrvr.ai'), vendorCacheDir('https://rover.rtrvr.ai'));
+  assert.notEqual(vendorCacheDir('https://rover.rtrvr.ai'), vendorCacheDir('https://staging.rtrvr.ai'));
 });
 
 test('runtime manifest v2 uses stable SHA-256 identities', () => {
@@ -35,7 +42,7 @@ test('vendorTargets maps embed + worker to the right URLs and dist paths', () =>
 
   const embed = targets.find(t => t.name === 'embed');
   assert.equal(embed.url, 'https://rover.rtrvr.ai/embed-core.js');
-  assert.deepEqual(embed.fallbackUrls, ['https://rover.rtrvr.ai/embed.js']);
+  assert.equal(embed.fallbackUrls, undefined);
   assert.equal(embed.distFile, path.join(distDir, 'vendor', 'rover-embed.js'));
 
   const worker = targets.find(t => t.name === 'worker');
@@ -46,7 +53,7 @@ test('vendorTargets maps embed + worker to the right URLs and dist paths', () =>
 test('looksLikeRoverRuntime accepts executable runtimes, rejects HTML, tiny bodies, and loader stubs', () => {
   const embedBody = [
     "var __ROVER_SCRIPT_URL__='';",
-    `var __roverSDK=(()=>{window.rover=function(){};const a='https://agent.rtrvr.ai';const b='data-rover-methods';${'x'.repeat(2000)}})();`,
+    `(()=>{const a='https://agent.rtrvr.ai/v2/rover/session/open';const b='data-rover-methods';${'x'.repeat(2000)}})();`,
   ].join('');
   assert.equal(looksLikeRoverRuntime('embed', embedBody), true);
 
@@ -77,4 +84,60 @@ test('looksLikeRoverRuntime accepts executable runtimes, rejects HTML, tiny bodi
     `${'l'.repeat(2000)}})();`,
   ].join('');
   assert.equal(looksLikeRoverRuntime('embed', loaderBody), false);
+});
+
+test('resolveTargetArtifact prefers the content-addressed core and verifies alias parity', () => {
+  const [embed, worker] = vendorTargets('https://rover.rtrvr.ai', '/tmp/dist');
+  const coreSha = 'a'.repeat(64);
+  const workerSha = 'b'.repeat(64);
+  const manifest = {
+    runtimeRevision: 'abc123def456',
+    files: {
+      'embed-core.js': { sha256: coreSha, bytes: 1_234_567 },
+      'embed-core.abc123def456.js': { sha256: coreSha, bytes: 1_234_567 },
+      'worker/worker.js': { sha256: workerSha, bytes: 234_567 },
+    },
+  };
+
+  assert.deepEqual(resolveTargetArtifact(embed, manifest, 'https://rover.rtrvr.ai'), {
+    key: 'embed-core.abc123def456.js',
+    stableKey: 'embed-core.js',
+    sha256: coreSha,
+    bytes: 1_234_567,
+    urls: [
+      'https://rover.rtrvr.ai/embed-core.abc123def456.js',
+      'https://rover.rtrvr.ai/embed-core.js',
+    ],
+  });
+  assert.deepEqual(resolveTargetArtifact(worker, manifest, 'https://rover.rtrvr.ai'), {
+    key: 'worker/worker.js',
+    stableKey: 'worker/worker.js',
+    sha256: workerSha,
+    bytes: 234_567,
+    urls: ['https://rover.rtrvr.ai/worker/worker.js'],
+  });
+});
+
+test('resolveTargetArtifact rejects malformed and internally inconsistent manifests', () => {
+  const [embed] = vendorTargets('https://rover.rtrvr.ai', '/tmp/dist');
+  assert.throws(
+    () => resolveTargetArtifact(embed, { files: {} }, 'https://rover.rtrvr.ai'),
+    /manifest is missing embed-core\.js/,
+  );
+  assert.throws(
+    () => resolveTargetArtifact(embed, {
+      files: { 'embed-core.js': { sha256: 'not-a-digest', bytes: 42 } },
+    }, 'https://rover.rtrvr.ai'),
+    /invalid identity/,
+  );
+  assert.throws(
+    () => resolveTargetArtifact(embed, {
+      runtimeRevision: 'abc123def456',
+      files: {
+        'embed-core.js': { sha256: 'a'.repeat(64), bytes: 100 },
+        'embed-core.abc123def456.js': { sha256: 'b'.repeat(64), bytes: 100 },
+      },
+    }, 'https://rover.rtrvr.ai'),
+    /alias and immutable artifact disagree/,
+  );
 });
