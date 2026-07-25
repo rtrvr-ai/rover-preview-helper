@@ -358,7 +358,7 @@ async function prepareCspBypassForExplicitInject(tabId, state, url) {
 // the test-and-set below is atomic: when two triggers race past the service
 // worker's own guards (the probe used to be a separate async round-trip),
 // exactly ONE gets `claimed: true` — the other observes the live claim and
-// skips, instead of both evaluating the 1.26 MB bundle (the inject-storm /
+// skips, instead of both evaluating the ~1.5 MB bundle (the inject-storm /
 // double-eval vector the badge counters keep catching).
 async function probeAndClaimMainWorld(tabId, signature) {
   try {
@@ -487,7 +487,7 @@ async function injectMainWorldState(tabId, state, reason = 'unknown') {
 
     // A booted document can't accept new config anyway (the bootstrap guard
     // bails), and re-evaluating the bundle would replace window.rover and orphan
-    // the live instance — so one tiny probe decides instead of a 1.26 MB eval.
+    // the live instance — so one tiny probe decides instead of a ~1.5 MB eval.
     // A bailed bootstrap (attempted, not booted) is only retried with a NEW
     // signature; same config would bail again on the same document forever.
     // The probe also atomically CLAIMS the document (single-threaded page JS),
@@ -814,7 +814,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
 // PAGE_READY content-script message covers every new document, and the
 // bootstrapped-probe makes duplicate triggers a micro no-op. onUpdated
 // 'complete' and webNavigation.onCompleted were fully redundant sources that
-// each re-evaluated the 1.26 MB bundle on the page main thread.
+// each re-evaluated the ~1.5 MB bundle on the page main thread.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   const url = String(changeInfo.url || tab.url || '');
   if (!url) return;

@@ -146,6 +146,27 @@ Build behavior:
 - `pnpm dev` (watch mode) reuses the cache so rebuilds stay instant and offline;
 - set `ROVER_EMBED_BASE` to vendor from a staging deploy instead of prod.
 
+### Staying current with prod Rover
+
+Rover ships continuously, so re-run `pnpm build` to pick up the current runtime; the
+build resolves the immutable core straight from prod's artifact manifest, so there is
+no version to bump by hand. `dist/vendor/VERSION.json` then records the exact
+`embed-core.<revision>.js` and worker that got packaged, along with the Rover source
+commit they were built from.
+
+Two things to check after a runtime bump, because they are the only places this repo
+encodes assumptions about Rover's shape:
+
+- **Boot config** — `normalizeConfig` in `src/shared.js` and the boot payload in
+  `src/main-world-bootstrap.js` forward a fixed key set. The runtime silently drops
+  keys it no longer reads, so a stale key looks applied when it isn't.
+- **Headless events** — the run lifecycle contract documented in
+  [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) and implemented in
+  [examples/headless-control-extension/page-bridge.js](./examples/headless-control-extension/page-bridge.js).
+
+`pnpm test` covers the config normalization, injection guards, CSP ladder, and the
+vendor pipeline's integrity checks.
+
 Website owners should still install Rover with the public `embed.js` snippet.
 This helper uses `embed-core.js` because it injects Rover directly from a Chrome
 extension instead of loading it through a normal page `<script src>` tag.
@@ -268,11 +289,17 @@ Extensions can trigger Rover without using the Rover widget input, but the integ
 
 - inject Rover with a Workspace config;
 - inject a small MAIN-world bridge that can access `window.rover`;
-- call `rover.send(prompt)` from that bridge;
-- listen for `run_started`, `response_shown`, `run_completed`, and `error`;
+- subscribe first, then call `rover.send(prompt, options?)` from that bridge;
+- settle on the first terminal signal: `run_completed` (branch on `payload.outcome`),
+  `run_state_transition` with `needsUserInput: true` for a run that parked on a
+  clarifying question, or `auth_required`;
+- read the answer from `payload.summary`, falling back to the last `response_shown` text;
 - relay results back to the extension background script for storage or backend calls.
 
-See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) and the copyable sample in [examples/headless-control-extension](./examples/headless-control-extension).
+`run_completed` fires for failures too, a parked run never emits it at all, and `error`
+events carry a `scope` that tells you whether they belong to your run. See
+[HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full event and payload reference,
+plus the copyable sample in [examples/headless-control-extension](./examples/headless-control-extension).
 
 ## Common mistakes
 

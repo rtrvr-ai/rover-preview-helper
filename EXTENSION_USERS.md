@@ -155,6 +155,28 @@ chrome.action.onClicked.addListener(async tab => {
 });
 ```
 
+Inject the runtime **once per document**. It is ~1.5 MB, and a second evaluation makes
+Rover shut the first instance down and hand the page to a fresh one — deferred until the
+in-flight run ends if one is active, so a stray re-inject can look like it did nothing
+and then take the page over later. Probe before injecting:
+
+```js
+// Add this at the top of the onClicked listener above, before the two
+// executeScript calls that boot Rover.
+const [probe] = await chrome.scripting.executeScript({
+  target: { tabId: tab.id, allFrames: false },
+  world: "MAIN",
+  // Before boot, window.rover is a queue shim: a bare function with `.q`.
+  func: () => typeof window.rover?.send === "function" && !Array.isArray(window.rover?.q)
+});
+if (probe?.result) return; // already booted on this document
+```
+
+`workerUrl` is required on this path. Because the runtime is injected with
+`executeScript`, its `document.currentScript` is `null` and it cannot derive the
+worker path on its own. Rover loads a cross-origin `workerUrl` through a `blob:`
+module worker, so the file must also be listed in `web_accessible_resources`.
+
 ## Use Isolated Content Scripts for Your Own UI
 
 If you are adding your own extension UI or custom automation logic, keep most of it in an isolated content script. Use `world: "MAIN"` only for the small Rover boot bridge above.
@@ -176,19 +198,38 @@ The core shape is:
 
 ```js
 // MAIN-world bridge, after Rover has booted.
-window.rover.send("Extract the visible profile name and headline. Return JSON only.");
 window.rover.on("run_completed", result => {
+  // result.outcome is "success" | "failure" | "partial" | "abandoned"
+  // result.summary is the assistant's final answer text.
   window.postMessage({
     source: "my-extension-rover-bridge",
     type: "ROVER_HEADLESS_RESULT",
     result
   }, "*");
 });
+
+// A run that needs clarification never reaches run_completed.
+window.rover.on("run_state_transition", state => {
+  if (state?.needsUserInput !== true) return;
+  window.postMessage({
+    source: "my-extension-rover-bridge",
+    type: "ROVER_HEADLESS_NEEDS_INPUT",
+    questions: state.questions
+  }, "*");
+});
+
+window.rover.send("Extract the visible profile name and headline. Return JSON only.");
 ```
 
-Do not expect `rover.send(...)` to return the output directly. It starts an async Rover run. Your extension should listen for `run_completed`, `response_shown`, and `error`, then store the terminal result from the background service worker.
+Do not expect `rover.send(...)` to return the output directly. It starts an async Rover run. Subscribe **before** you send, then store the terminal result from the background service worker.
 
-See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge and [examples/headless-control-extension](./examples/headless-control-extension) for a copyable extension skeleton.
+Three things that trip up first attempts on the current SDK:
+
+- `run_completed` also fires for failures — branch on `payload.outcome`, not on the event.
+- A parked run (`needsUserInput: true`) only reports through `run_state_transition`, so a bridge waiting only on `run_completed` hangs until its timeout.
+- `error` events carry a `scope`; background scopes like `roverbook_attach` and `run_cancel_repair` are not failures of your run.
+
+See [HEADLESS_CONTROL.md](./HEADLESS_CONTROL.md) for the full bridge, the event/payload reference, and [examples/headless-control-extension](./examples/headless-control-extension) for a copyable extension skeleton.
 
 ## Common Fixes
 

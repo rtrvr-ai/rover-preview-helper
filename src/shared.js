@@ -81,14 +81,33 @@ function normalizeUiConfig(value) {
   return Object.keys(ui).length ? ui : undefined;
 }
 
+// Page-capture knobs the Rover runtime accepts on boot config. The runtime drops
+// keys it doesn't recognize and clamps the numeric budgets itself, so this only
+// has to filter by type — but it must not forward keys the runtime no longer
+// reads, or a Workspace config silently looks applied when it isn't.
+export const PAGE_CONFIG_NUMERIC_KEYS = [
+  'totalBudgetMs',
+  'pageDataTimeoutMs',
+  'pdfTextSelectionTimeoutMs',
+  'adaptiveSettleDebounceMs',
+  'adaptiveSettleMaxWaitMs',
+  'adaptiveSettleRetries',
+  'sparseTreeRetryDelayMs',
+  'sparseTreeRetryMaxAttempts',
+];
+
 function normalizePageConfig(value) {
   if (!value || typeof value !== 'object') return undefined;
   const pageConfig = {};
   if (typeof value.disableAutoScroll === 'boolean') {
     pageConfig.disableAutoScroll = value.disableAutoScroll;
   }
-  if (value.backgroundTabs === 'identity' || value.backgroundTabs === 'digest_unchanged' || value.backgroundTabs === 'full') {
-    pageConfig.backgroundTabs = value.backgroundTabs;
+  if (typeof value.onlyTextContent === 'boolean') {
+    pageConfig.onlyTextContent = value.onlyTextContent;
+  }
+  for (const key of PAGE_CONFIG_NUMERIC_KEYS) {
+    const numeric = Number(value[key]);
+    if (Number.isFinite(numeric)) pageConfig[key] = Math.trunc(numeric);
   }
   return Object.keys(pageConfig).length ? pageConfig : undefined;
 }
@@ -342,7 +361,7 @@ export function encodeHelperConfigFragment(config) {
 
 // A document keeps its booted Rover instance for its whole lifetime: the
 // bootstrap guard bails on a second run, so re-injecting the bundle can never
-// deliver new config — it only re-evaluates ~1.26 MB on the page main thread
+// deliver new config — it only re-evaluates ~1.5 MB on the page main thread
 // and replaces window.rover, orphaning the live instance. Skip whenever the
 // probe says the document already bootstrapped, regardless of signature.
 //

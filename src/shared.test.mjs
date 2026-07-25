@@ -106,21 +106,34 @@ test('normalizeConfig exposes default action spotlight in helper configs', () =>
   });
 });
 
-test('normalizeConfig preserves all supported background-tab rollback modes', () => {
-  for (const backgroundTabs of ['identity', 'digest_unchanged', 'full']) {
-    const config = normalizeConfig({
-      siteId: 'site',
-      publicKey: 'pk',
-      pageConfig: { disableAutoScroll: false, backgroundTabs },
-    });
-    assert.deepEqual(config.pageConfig, { disableAutoScroll: false, backgroundTabs });
-  }
-  const invalid = normalizeConfig({
+test('normalizeConfig forwards the page-capture knobs the runtime still reads', () => {
+  const config = normalizeConfig({
     siteId: 'site',
     publicKey: 'pk',
-    pageConfig: { backgroundTabs: 'everything' },
+    pageConfig: {
+      disableAutoScroll: false,
+      onlyTextContent: true,
+      totalBudgetMs: 9000,
+      adaptiveSettleRetries: 2.7,
+    },
   });
-  assert.deepEqual(invalid.pageConfig, { disableAutoScroll: true });
+  assert.deepEqual(config.pageConfig, {
+    disableAutoScroll: false,
+    onlyTextContent: true,
+    totalBudgetMs: 9000,
+    adaptiveSettleRetries: 2,
+  });
+});
+
+test('normalizeConfig drops page-capture keys the runtime no longer accepts', () => {
+  const config = normalizeConfig({
+    siteId: 'site',
+    publicKey: 'pk',
+    // backgroundTabs was removed from the Rover runtime's pageConfig contract;
+    // forwarding it would make a stale Workspace config look applied.
+    pageConfig: { backgroundTabs: 'identity', onlyTextContent: 'yes' },
+  });
+  assert.deepEqual(config.pageConfig, { disableAutoScroll: true });
 });
 
 test('isHostAllowed allows any host with wildcard *', () => {

@@ -2,7 +2,7 @@
   const state = window.__ROVER_PREVIEW_HELPER_STATE__;
   if (!state || window.__ROVER_PREVIEW_HELPER_BOOTSTRAPPED__) return;
   // "This config was tried on this document" — set before the host-allow check
-  // so a bail doesn't leave the background re-injecting the 1.26 MB bundle on
+  // so a bail doesn't leave the background re-injecting the ~1.5 MB bundle on
   // every navigation event. BOOTSTRAPPED below keeps meaning "a live Rover
   // instance owns this document"; the probe treats attempted+same-signature as
   // skip, while a changed config (new signature) still gets a fresh attempt.
@@ -114,8 +114,22 @@
     if (typeof state.pageConfig.disableAutoScroll === 'boolean') {
       pageConfig.disableAutoScroll = state.pageConfig.disableAutoScroll;
     }
-    if (['identity', 'digest_unchanged', 'full'].includes(state.pageConfig.backgroundTabs)) {
-      pageConfig.backgroundTabs = state.pageConfig.backgroundTabs;
+    if (typeof state.pageConfig.onlyTextContent === 'boolean') {
+      pageConfig.onlyTextContent = state.pageConfig.onlyTextContent;
+    }
+    // Numeric page-capture budgets; the runtime clamps each to its own range.
+    for (const key of [
+      'totalBudgetMs',
+      'pageDataTimeoutMs',
+      'pdfTextSelectionTimeoutMs',
+      'adaptiveSettleDebounceMs',
+      'adaptiveSettleMaxWaitMs',
+      'adaptiveSettleRetries',
+      'sparseTreeRetryDelayMs',
+      'sparseTreeRetryMaxAttempts',
+    ]) {
+      const numeric = Number(state.pageConfig[key]);
+      if (Number.isFinite(numeric)) pageConfig[key] = Math.trunc(numeric);
     }
     if (Object.keys(pageConfig).length) bootConfig.pageConfig = pageConfig;
   }

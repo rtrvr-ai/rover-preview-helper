@@ -28,10 +28,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     type: "ROVER_HEADLESS_RUN",
     requestId,
     prompt: String(message.prompt || ""),
-    timeoutMs: Number(message.timeoutMs || 120000)
+    timeoutMs: Number(message.timeoutMs || 180000),
+    readyTimeoutMs: Number(message.readyTimeoutMs || 20000),
+    // Set for the second and later prompts on a page so Rover closes out the
+    // previous task before this one starts.
+    startNewTask: message.startNewTask === true,
+    // Optional passthrough to rover.send(prompt, options): { playbookId, engagementKind }.
+    sendOptions: message.sendOptions && typeof message.sendOptions === "object"
+      ? message.sendOptions
+      : undefined
   }, "*");
 
   sendResponse({ ok: true, requestId });
   return true;
 });
-
