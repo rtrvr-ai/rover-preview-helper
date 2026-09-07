@@ -217,6 +217,30 @@ function targetManifestKey(target) {
  *
  * @param {{ refresh?: boolean, distDir?: string, now?: string, log?: (msg: string) => void }} options
  */
+/** Package one verified local release, without mixing it with production/cache files. */
+export async function vendorLocalRoverRuntime(sourceDir, distDir, now = new Date().toISOString()) {
+  const upstream = JSON.parse(await readFile(path.join(sourceDir, 'rover-artifacts-manifest.json'), 'utf8'));
+  validateRuntimeManifestPayload(upstream, 'local runtime manifest');
+  const files = [];
+  // Verify the complete pair before touching dist.
+  for (const target of vendorTargets(DEFAULT_ROVER_EMBED_BASE, distDir)) {
+    const artifact = resolveTargetArtifact(target, upstream);
+    const body = await readFile(path.join(sourceDir, artifact.key));
+    if (body.byteLength !== artifact.bytes || sha256(body) !== artifact.sha256) throw new Error(`Local ${artifact.key} failed manifest verification.`);
+    files.push({ target, artifact, body });
+  }
+  await mkdir(path.join(distDir, 'vendor'), { recursive: true });
+  for (const file of files) await writeFile(file.target.distFile, file.body);
+  const extensionManifest = JSON.parse(await readFile(path.join(rootDir, 'manifest.json'), 'utf8'));
+  const manifest = {
+    version: RUNTIME_MANIFEST_VERSION, extensionManifestVersion: extensionManifest.version,
+    roverSourceCommit: upstream.sourceCommit, source: 'verified-local-runtime', fetchedAt: now,
+    files: files.map(({ target, artifact }) => ({ name: target.name, file: path.basename(target.distFile), sourceUrl: artifact.key, sha256: artifact.sha256, bytes: artifact.bytes })),
+  };
+  await writeFile(path.join(distDir, 'vendor', 'VERSION.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  return { base: 'verified-local-runtime', files: manifest.files, manifest };
+}
+
 export async function vendorRoverRuntime(options = {}) {
   const {
     refresh = true,
@@ -224,6 +248,8 @@ export async function vendorRoverRuntime(options = {}) {
     now = new Date().toISOString(),
     log = console.log,
   } = options;
+
+  if (process.env.ROVER_RUNTIME_DIR) return vendorLocalRoverRuntime(path.resolve(process.env.ROVER_RUNTIME_DIR), distDir, now);
 
   const base = vendorBase();
   const cacheDir = vendorCacheDir(base);

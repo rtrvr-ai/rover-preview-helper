@@ -141,3 +141,26 @@ test('resolveTargetArtifact rejects malformed and internally inconsistent manife
     /alias and immutable artifact disagree/,
   );
 });
+
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { vendorLocalRoverRuntime } from './vendor.mjs';
+
+test('local releases vendor a matched pair and fail before writing a mismatched pair', async t => {
+  const root = await mkdtemp(path.join(tmpdir(), 'rover-helper-vendor-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const source = path.join(root, 'source'), dist = path.join(root, 'dist');
+  await mkdir(path.join(source, 'worker'), { recursive: true });
+  const core = Buffer.from('core-runtime'), worker = Buffer.from('worker-runtime');
+  const files = { 'embed-core.js': { bytes: core.length, sha256: sha256(core) }, 'worker/worker.js': { bytes: worker.length, sha256: sha256(worker) } };
+  await writeFile(path.join(source, 'embed-core.js'), core);
+  await writeFile(path.join(source, 'worker/worker.js'), worker);
+  await writeFile(path.join(source, 'rover-artifacts-manifest.json'), JSON.stringify({ files, sourceCommit: 'a'.repeat(40) }));
+  await vendorLocalRoverRuntime(source, dist);
+  const version = JSON.parse(await readFile(path.join(dist, 'vendor/VERSION.json'), 'utf8'));
+  assert.equal(version.roverSourceCommit, 'a'.repeat(40));
+  assert.equal(version.source, 'verified-local-runtime');
+  await writeFile(path.join(source, 'worker/worker.js'), 'bad-worker');
+  await assert.rejects(vendorLocalRoverRuntime(source, dist), /failed manifest verification/);
+  assert.equal(await readFile(path.join(dist, 'vendor/worker.js'), 'utf8'), 'worker-runtime');
+});

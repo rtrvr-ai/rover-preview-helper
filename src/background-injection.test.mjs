@@ -181,3 +181,18 @@ test('partial injection failure releases claim and permits immediate retry', asy
   assert.equal(await injectMainWorldState(43, state, 'tabs_updated_loading'), true);
   assert.equal(page.__ROVER_PREVIEW_HELPER_BOOTSTRAPPED__, true);
 });
+
+test('action readiness is a popup-only, single read of the configured tab', async () => {
+  chrome.runtime.id = 'test';
+  let reads = 0;
+  page.rover = { getToolStatus() { reads++; return { runtimeRevision: 'test', actions: [{ name: 'highlight_links', status: 'ready' }] }; } };
+  sessionStore['rover-preview-helper:tab:99'] = { siteId: 'test-site', publicKey: 'public-fixture' };
+  const listener = chrome.runtime.onMessage.listeners[0];
+  const message = { type: 'ROVER_PREVIEW_HELPER_TOOL_STATUS', tabId: 99 };
+  assert.equal(listener(message, { id: 'test', tab: { id: 99 } }, () => assert.fail('page cannot request status')), undefined);
+  assert.equal(reads, 0);
+  const response = await new Promise(resolve => assert.equal(listener(message, { id: 'test' }, resolve), true));
+  assert.equal(response.ok, true);
+  assert.equal(response.status.actions[0].status, 'ready');
+  assert.equal(reads, 1);
+});

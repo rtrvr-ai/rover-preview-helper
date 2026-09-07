@@ -60,12 +60,10 @@ function renderTabState(tab, state) {
 
   tabBadgeEl.style.display = 'inline-flex';
   tabCardEl.style.display = 'block';
-  tabSummaryEl.innerHTML = [
-    host ? `<strong>Host:</strong> ${host}` : '',
-    siteId ? `<strong>Site:</strong> ${siteId}` : '',
-    `<strong>Mode:</strong> ${mode}`,
-    `<strong>Source:</strong> ${source}`,
-  ].filter(Boolean).join('<br />');
+  tabSummaryEl.textContent = [
+    host ? `Host: ${host}` : '', siteId ? `Site: ${siteId}` : '',
+    `Mode: ${mode}`, `Source: ${source}`,
+  ].filter(Boolean).join('\n');
 }
 
 async function loadTabState(tabId) {
@@ -163,3 +161,19 @@ configEl.addEventListener('input', () => {
     // Ignore initial load failures.
   }
 })();
+
+
+document.getElementById('check-tools')?.addEventListener('click', async () => {
+  const output = document.getElementById('tool-status');
+  if (!output) return;
+  output.textContent = 'Checking configured actions…';
+  try {
+    const tab = await getActiveTab();
+    const response = await chrome.runtime.sendMessage({ type: 'ROVER_PREVIEW_HELPER_TOOL_STATUS', tabId: tab?.id });
+    if (!response?.ok) throw new Error(response?.error || 'Could not read actions.');
+    const status = response.status;
+    output.textContent = !status ? 'This runtime cannot report action readiness. Rebuild and reload Preview Helper, then reconnect.'
+      : !status.actions?.length ? 'No browser actions were returned for this site. Use the same site config where you saved the action. Temporary previews have a separate site.'
+      : status.actions.slice(0, 20).map(action => `${String(action.name).slice(0, 64)}: ${action.status === 'ready' ? 'ready' : action.status === 'loading' ? 'loading' : 'unavailable; reconnect and check the site security policy'}`).join(' · ');
+  } catch (error) { output.textContent = String(error?.message || 'Could not read actions.'); }
+});

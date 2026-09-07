@@ -341,3 +341,19 @@ Be careful not to:
 - Rover Workspace: [https://rtrvr.ai/rover/workspace](https://rtrvr.ai/rover/workspace)
 - Hosted website walkthrough: [https://www.rtrvr.ai/rover/docs/try-on-other-sites](https://www.rtrvr.ai/rover/docs/try-on-other-sites)
 - Hosted preview API docs: [https://www.rtrvr.ai/rover/docs/instant-preview-api](https://www.rtrvr.ai/rover/docs/instant-preview-api)
+
+## Testing configured actions
+
+Use the same `siteId` and public key as the Workspace site where you saved the action. A reusable test config belongs to its signed-in owner and uses that owner's subscription/credit scope. A temporary Hosted Preview has a different site context and does not inherit actions from another site.
+
+Saved browser actions load automatically with Rover. Handler-only actions still require your page to register the matching handler. Server webhooks and server code use the site's backend configuration. Both ACT and planner can select configured actions; planner delegates execution to ACT. Rover asks the visitor for missing information, clarification, or approval of the requested outcome when needed. It does not add a separate approval prompt for each tool.
+
+Click **Check configured actions** in the helper popup to check browser-action readiness. If an action is unavailable, reconnect with the current helper build and verify that you selected the right site. Site security policies or browser restrictions may still prevent a script from loading. The helper is a quick test surface; verify the final install on your website too.
+
+The helper packages a core/worker pair when it is built. After a Rover update, rebuild the helper, reload it in `chrome://extensions`, and reconnect the tab. To test an unreleased local Rover build, first sync its artifacts to `rtrvr-cloud-website/public`, then run:
+
+```sh
+ROVER_RUNTIME_DIR=../rtrvr-cloud-website/public pnpm build
+```
+
+This checks both files against the local artifact manifest before copying either file. `dist/vendor/VERSION.json` records the Rover source commit and hashes. Without `ROVER_RUNTIME_DIR`, the normal build continues to use the published runtime.

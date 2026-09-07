@@ -698,6 +698,21 @@ function getTabIdFromSender(sender) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== 'object') return;
 
+  if (message.type === 'ROVER_PREVIEW_HELPER_TOOL_STATUS') {
+    // This read is for the extension popup, never page relays.
+    if (sender.id !== chrome.runtime.id || sender.tab) return;
+    void (async () => {
+      const tabId = Number(message.tabId);
+      if (!Number.isInteger(tabId) || !(await readState(tabId))) throw new Error('No preview is configured for this tab.');
+      const results = await chrome.scripting.executeScript({
+        target: { tabId, allFrames: false }, world: 'MAIN',
+        func: () => typeof window.rover?.getToolStatus === 'function' ? window.rover.getToolStatus() : null,
+      });
+      sendResponse({ ok: true, status: results[0]?.result || null });
+    })().catch(() => sendResponse({ ok: false, error: 'Could not read actions on this tab.' }));
+    return true;
+  }
+
   if (message.type === CSP_BLOCKED_MESSAGE) {
     const tabId = getTabIdFromSender(sender);
     if (tabId === null) return;
