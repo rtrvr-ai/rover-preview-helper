@@ -139,6 +139,12 @@ textarea:focus {
   font-size: 12px;
 }
 
+/* Action readiness prints one line per action, each with its own cause. */
+#tool-status {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
 button {
   appearance: none;
   border: 0;

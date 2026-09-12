@@ -163,6 +163,29 @@ configEl.addEventListener('input', () => {
 })();
 
 
+// The runtime already tells us exactly why an action is not runnable. Printing
+// one blanket "check the site security policy" for every cause sent people
+// hunting CSP problems that did not exist.
+const ACTION_STATUS_HELP = {
+  bundle_load_failed: 'the action script could not be fetched — check the network tab and the site script policy',
+  bundle_load_timeout: 'the action script never finished loading — reconnect to retry',
+  bundle_replaced: 'the action changed while loading — reconnect to pick up the new version',
+  client_action_not_registered: 'the script loaded but registered no handler — the snippet may have thrown',
+  stale_bundle_nonce: 'the script arrived after Rover reloaded — reconnect',
+  missing_bundle_nonce: 'the script arrived after Rover reloaded — reconnect',
+  client_action_bundle_unavailable: 'the page gave up waiting for this action — reconnect to retry',
+  bundle_not_loaded: 'Rover has not started loading this action yet — reconnect',
+};
+
+function describeActionStatus(action) {
+  const name = String(action?.name || '').slice(0, 64);
+  if (action?.status === 'ready') return `${name}: ready`;
+  if (action?.status === 'loading') return `${name}: loading${action.slow ? ' (slow — still trying)' : ''}`;
+  const code = String(action?.code || '').slice(0, 60);
+  const help = ACTION_STATUS_HELP[code];
+  return `${name}: unavailable${code ? ` [${code}]` : ''}${help ? ` — ${help}` : ''}`;
+}
+
 document.getElementById('check-tools')?.addEventListener('click', async () => {
   const output = document.getElementById('tool-status');
   if (!output) return;
@@ -174,6 +197,6 @@ document.getElementById('check-tools')?.addEventListener('click', async () => {
     const status = response.status;
     output.textContent = !status ? 'This runtime cannot report action readiness. Rebuild and reload Preview Helper, then reconnect.'
       : !status.actions?.length ? 'No browser actions were returned for this site. Use the same site config where you saved the action. Temporary previews have a separate site.'
-      : status.actions.slice(0, 20).map(action => `${String(action.name).slice(0, 64)}: ${action.status === 'ready' ? 'ready' : action.status === 'loading' ? 'loading' : 'unavailable; reconnect and check the site security policy'}`).join(' · ');
+      : status.actions.slice(0, 20).map(describeActionStatus).join('\n');
   } catch (error) { output.textContent = String(error?.message || 'Could not read actions.'); }
 });
